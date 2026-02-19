@@ -1311,7 +1311,7 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 
   const syncAuthToken = (token = getStoredAuthToken()) =>
     invokeBridge('desktop_bridge_set_auth_token', {
-      auth_token: typeof token === 'string' && token ? token : null
+      authToken: typeof token === 'string' && token ? token : null
     });
 
   const patchLocalStorageTokenSync = () => {
@@ -1359,7 +1359,7 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
         typeof authToken === 'string' && authToken ? authToken : getStoredAuthToken();
       await syncAuthToken(normalizedToken);
       return invokeBridge('desktop_bridge_restart_backend', {
-        auth_token: normalizedToken
+        authToken: normalizedToken
       });
     },
     stopBackend: () => invokeBridge('desktop_bridge_stop_backend'),
