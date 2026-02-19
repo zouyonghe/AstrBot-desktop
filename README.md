@@ -4,7 +4,7 @@
 
 # AstrBot Desktop (Tauri)
 
-AstrBot 的独立桌面端仓库（Tauri 2.10，内置 CPython 运行时打包后端）。
+AstrBot 的独立桌面端仓库。
 
 <a href="https://github.com/AstrBotDevs/AstrBot">原始项目仓库</a> ｜
 <a href="https://astrbot.app/">官方文档</a> ｜
