@@ -386,7 +386,7 @@ impl BackendState {
         }
 
         if plan.packaged_mode {
-            command.env("ASTRBOT_ELECTRON_CLIENT", "1");
+            command.env("ASTRBOT_DESKTOP_CLIENT", "1");
             if env::var("DASHBOARD_HOST").is_err() && env::var("ASTRBOT_DASHBOARD_HOST").is_err() {
                 command.env("DASHBOARD_HOST", "127.0.0.1");
             }
@@ -950,7 +950,7 @@ Content-Length: {}\r\n\
 }
 
 #[tauri::command]
-fn desktop_bridge_is_electron_runtime() -> bool {
+fn desktop_bridge_is_desktop_runtime() -> bool {
     true
 }
 
@@ -1038,7 +1038,7 @@ fn main() {
     tauri::Builder::default()
         .manage(BackendState::default())
         .invoke_handler(tauri::generate_handler![
-            desktop_bridge_is_electron_runtime,
+            desktop_bridge_is_desktop_runtime,
             desktop_bridge_get_backend_state,
             desktop_bridge_set_auth_token,
             desktop_bridge_restart_backend,
@@ -1602,8 +1602,8 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 
   window.astrbotDesktop = {
     __tauriBridge: true,
-    isElectron: true,
-    isElectronRuntime: () => Promise.resolve(true),
+    isDesktop: true,
+    isDesktopRuntime: () => Promise.resolve(true),
     getBackendState: () => invokeBridge('desktop_bridge_get_backend_state'),
     restartBackend: async (authToken = null) => {
       const normalizedToken =
