@@ -65,7 +65,7 @@ cargo tauri build
 
 ```bash
 export ASTRBOT_SOURCE_GIT_URL=https://github.com/AstrBotDevs/AstrBot.git
-export ASTRBOT_SOURCE_GIT_REF=main
+export ASTRBOT_SOURCE_GIT_REF=master
 ```
 
 使用本地 AstrBot 源码（优先级最高）：

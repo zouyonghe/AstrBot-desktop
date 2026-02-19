@@ -10,7 +10,7 @@ on:
       source_git_ref:
         description: AstrBot source git ref (branch/tag/sha)
         required: false
-        default: main
+        default: master
   push:
     branches:
       - main
@@ -29,7 +29,7 @@ permissions:
 
 env:
   ASTRBOT_SOURCE_GIT_URL: ${{ vars.ASTRBOT_SOURCE_GIT_URL || 'https://github.com/AstrBotDevs/AstrBot.git' }}
-  ASTRBOT_SOURCE_GIT_REF: ${{ vars.ASTRBOT_SOURCE_GIT_REF || 'main' }}
+  ASTRBOT_SOURCE_GIT_REF: ${{ vars.ASTRBOT_SOURCE_GIT_REF || 'master' }}
 
 jobs:
   build:
