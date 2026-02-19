@@ -1058,7 +1058,7 @@ fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
         append_desktop_log("tray menu state already exists, skipping manage");
     }
 
-    let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+    let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("AstrBot")
         .icon(tauri::include_image!("./icons/tray.png"))
@@ -1079,9 +1079,7 @@ fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
         });
 
     #[cfg(target_os = "macos")]
-    {
-        tray_builder = tray_builder.icon_as_template(true);
-    }
+    let tray_builder = tray_builder.icon_as_template(true);
 
     tray_builder
         .build(app_handle)
