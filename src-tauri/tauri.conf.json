@@ -31,9 +31,9 @@
     "icon": [
       "icons/icon.png"
     ],
-    "resources": [
-      "../resources/backend",
-      "../resources/webui"
-    ]
+    "resources": {
+      "../resources/backend": "backend",
+      "../resources/webui": "webui"
+    }
   }
 }

@@ -109,16 +109,78 @@ const installRuntimeDependencies = (runtimePython) => {
     });
   };
 
-  const installResult = runPipInstall(['-r', requirementsPath]);
-  if (installResult.error) {
-    throw new Error(
-      `Failed to install backend runtime dependencies: ${installResult.error.message}`,
+  const isWindowsArm64 = process.platform === 'win32' && process.arch === 'arm64';
+  if (isWindowsArm64) {
+    // Prefer prebuilt wheels and avoid compiling cryptography from source on Windows ARM64.
+    // Fallback versions are configured by env var, for example:
+    // ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS="43.0.3,42.0.8,41.0.7"
+    const fallbackVersionsRaw = (
+      process.env.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || ''
+    ).trim();
+    const cryptographyFallbackVersions = Array.from(
+      new Set(
+        fallbackVersionsRaw
+          .split(/[,\s]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
     );
-  }
-  if (installResult.status !== 0) {
-    throw new Error(
-      `Backend runtime dependency installation failed with exit code ${installResult.status}.`,
-    );
+    const installAttempts =
+      cryptographyFallbackVersions.length > 0 ? cryptographyFallbackVersions : [null];
+
+    let installSucceeded = false;
+    let lastFailureDetail = '';
+
+    for (const version of installAttempts) {
+      const pipArgs = ['--prefer-binary', '--only-binary=cryptography'];
+      if (version) {
+        const constraintsPath = path.join(
+          outputDir,
+          `constraints-win-arm64-cryptography-${version}.txt`,
+        );
+        fs.writeFileSync(constraintsPath, `cryptography==${version}\n`, 'utf8');
+        pipArgs.push('--constraint', constraintsPath);
+        console.log(
+          `Installing backend dependencies on Windows ARM64 with cryptography fallback ${version} (binary only).`,
+        );
+      } else {
+        console.log(
+          'Installing backend dependencies on Windows ARM64 with cryptography binary-only mode (no fallback pin).',
+        );
+      }
+      pipArgs.push('-r', requirementsPath);
+
+      const installResult = runPipInstall(pipArgs);
+
+      if (installResult.error) {
+        lastFailureDetail = installResult.error.message;
+        continue;
+      }
+      if (installResult.status === 0) {
+        installSucceeded = true;
+        break;
+      }
+      lastFailureDetail = `exit code ${installResult.status}`;
+    }
+
+    if (!installSucceeded) {
+      throw new Error(
+        `Backend runtime dependency installation failed on Windows ARM64 after cryptography binary/fallback attempts (${lastFailureDetail || 'unknown error'}). ` +
+          'Set ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS to control fallback versions.',
+      );
+    }
+  } else {
+    const installResult = runPipInstall(['-r', requirementsPath]);
+    if (installResult.error) {
+      throw new Error(
+        `Failed to install backend runtime dependencies: ${installResult.error.message}`,
+      );
+    }
+    if (installResult.status !== 0) {
+      throw new Error(
+        `Backend runtime dependency installation failed with exit code ${installResult.status}.`,
+      );
+    }
   }
 
   if (process.platform === 'win32') {

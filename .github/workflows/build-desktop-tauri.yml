@@ -204,6 +204,7 @@ PY
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: pnpm run build
