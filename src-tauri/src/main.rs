@@ -1572,8 +1572,28 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     });
 
   const isRuntimeBridgeEnabled = async (command, fallbackValue) => {
-    const result = await invokeBridge(command);
-    return typeof result === 'boolean' ? result : fallbackValue;
+    try {
+      const result = await invokeBridge(command);
+      if (typeof result === 'boolean') {
+        return result;
+      }
+
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn(
+          `[astrbotDesktop] ${command} returned non-boolean result, fallback to ${fallbackValue}`,
+          result,
+        );
+      }
+    } catch (error) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn(
+          `[astrbotDesktop] ${command} failed, fallback to ${fallbackValue}`,
+          error,
+        );
+      }
+    }
+
+    return fallbackValue;
   };
 
   const patchLocalStorageTokenSync = () => {
