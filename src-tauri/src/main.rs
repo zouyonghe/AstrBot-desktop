@@ -1897,9 +1897,7 @@ where
         .get()
         .is_some_and(|id| *id == thread::current().id())
     {
-        return Err(format!(
-            "refuse to run '{action_name}' via run_on_main_thread_with_result from main thread"
-        ));
+        return action(app_handle);
     }
 
     let app_handle_for_main = app_handle.clone();

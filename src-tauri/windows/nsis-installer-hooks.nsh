@@ -1,6 +1,8 @@
 !macro NSIS_HOOK_PREUNINSTALL
   ; Ensure packaged backend processes do not keep install files locked during uninstall.
   StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  IfFileExists "$0" +2 0
+    StrCpy $0 "powershell.exe"
   StrCpy $1 "$$installRoot = [System.IO.Path]::GetFullPath(''$INSTDIR'').TrimEnd([char]92).ToLower()"
   StrCpy $2 "$$installRootWithSep = $$installRoot + [string][char]92"
   StrCpy $3 "Get-CimInstance Win32_Process -Filter \"Name=''python.exe'' OR Name=''pythonw.exe''\""
