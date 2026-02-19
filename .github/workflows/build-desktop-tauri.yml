@@ -36,6 +36,11 @@ jobs:
       astrbot_version: ${{ steps.resolve.outputs.astrbot_version }}
       should_build: ${{ steps.resolve.outputs.should_build }}
     steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+
       - name: Resolve source, version and trigger guard
         id: resolve
         env:
@@ -95,7 +100,7 @@ jobs:
             git -C "${repo_dir}" remote add origin "${source_git_url}"
             git -C "${repo_dir}" fetch --depth 1 origin "${source_git_ref}"
             git -C "${repo_dir}" checkout --detach FETCH_HEAD
-            version="$(python3 -c "import pathlib, sys, tomllib; data = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')); print(data.get('project', {}).get('version') or '')" "${repo_dir}/pyproject.toml")"
+            version="$(python3 -c "import pathlib, sys, importlib, importlib.util; mod = 'tomllib' if importlib.util.find_spec('tomllib') else 'tomli'; toml = importlib.import_module(mod); data = toml.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')); print(data.get('project', {}).get('version') or '')" "${repo_dir}/pyproject.toml")"
             if [ -z "${version}" ]; then
               echo "Unable to resolve project.version from pyproject.toml" >&2
               exit 1

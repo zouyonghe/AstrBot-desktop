@@ -31,6 +31,10 @@ jobs:
       - name: Check Node scripts syntax
         run: |
           set -euo pipefail
+          if [ ! -d scripts ]; then
+            echo "scripts directory does not exist, skip Node scripts check."
+            exit 0
+          fi
           while IFS= read -r file; do
             echo "Checking ${file}"
             node --check "${file}"
@@ -39,4 +43,8 @@ jobs:
       - name: Check Python scripts syntax
         run: |
           set -euo pipefail
+          if [ ! -d scripts ]; then
+            echo "scripts directory does not exist, skip Python scripts check."
+            exit 0
+          fi
           python3 -m compileall -q scripts
