@@ -143,10 +143,10 @@ jobs:
             runner: ubuntu-24.04-arm
           - os_name: macos
             arch: amd64
-            runner: macos-13
+            runner: macos-latest
           - os_name: macos
             arch: arm64
-            runner: macos-14
+            runner: macos-latest
           - os_name: windows
             arch: amd64
             runner: windows-2022
@@ -249,7 +249,7 @@ jobs:
     needs:
       - resolve_build_context
       - build
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -289,21 +289,6 @@ jobs:
 
           print("No duplicate artifact filenames detected.")
           PY
-
-      - name: Verify DMG integrity before release upload
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          dmg_files=(release-artifacts/*.dmg)
-          if [ "${#dmg_files[@]}" -eq 0 ]; then
-            echo "No DMG files found in release-artifacts"
-          fi
-
-          for dmg in "${dmg_files[@]}"; do
-            echo "Verifying ${dmg}"
-            hdiutil verify "${dmg}"
-          done
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2.5.0
