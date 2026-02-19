@@ -791,7 +791,7 @@ fn desktop_bridge_set_auth_token(
 }
 
 #[tauri::command]
-fn desktop_bridge_restart_backend(
+async fn desktop_bridge_restart_backend(
     app_handle: AppHandle,
     auth_token: Option<String>,
 ) -> BackendBridgeResult {
@@ -803,14 +803,24 @@ fn desktop_bridge_restart_backend(
         };
     }
 
-    match state.restart_backend(&app_handle, auth_token.as_deref()) {
-        Ok(()) => BackendBridgeResult {
+    let app_handle_cloned = app_handle.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle_cloned.state::<BackendState>();
+        state.restart_backend(&app_handle_cloned, auth_token.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(())) => BackendBridgeResult {
             ok: true,
             reason: None,
         },
-        Err(error) => BackendBridgeResult {
+        Ok(Err(error)) => BackendBridgeResult {
             ok: false,
             reason: Some(error),
+        },
+        Err(error) => BackendBridgeResult {
+            ok: false,
+            reason: Some(format!("Backend restart task failed: {error}")),
         },
     }
 }
@@ -1058,16 +1068,21 @@ fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
                 return;
             }
 
-            let state = app_handle.state::<BackendState>();
-            match state.restart_backend(app_handle, None) {
-                Ok(()) => {
-                    append_desktop_log("backend restarted from tray menu");
-                    reload_main_window(app_handle);
+            let app_handle_cloned = app_handle.clone();
+            thread::spawn(move || {
+                let state = app_handle_cloned.state::<BackendState>();
+                match state.restart_backend(&app_handle_cloned, None) {
+                    Ok(()) => {
+                        append_desktop_log("backend restarted from tray menu");
+                        reload_main_window(&app_handle_cloned);
+                    }
+                    Err(error) => {
+                        append_desktop_log(&format!(
+                            "backend restart from tray menu failed: {error}"
+                        ));
+                    }
                 }
-                Err(error) => {
-                    append_desktop_log(&format!("backend restart from tray menu failed: {error}"));
-                }
-            }
+            });
         }
         TRAY_MENU_QUIT => {
             let state = app_handle.state::<BackendState>();
