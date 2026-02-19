@@ -27,22 +27,54 @@ AstrBot 的独立桌面端仓库。
 
 适用于需要调试桌面壳、替换上游分支、验证本地改动的场景。
 
-### 1. 安装依赖
+### 1. 查看可用命令（推荐）
+
+仓库内置了 `Makefile`，可直接查看常用命令：
+
+```bash
+make help
+```
+
+### 2. 安装依赖
 
 ```bash
 pnpm install
 ```
 
-### 2. 本地开发运行
+也可使用：
+
+```bash
+make deps
+```
+
+### 3. 准备资源
+
+```bash
+make prepare
+```
+
+### 4. 本地开发运行
 
 ```bash
 pnpm run dev
 ```
 
-### 3. 构建安装包
+也可使用：
+
+```bash
+make dev
+```
+
+### 5. 构建安装包
 
 ```bash
 pnpm run build
+```
+
+也可使用：
+
+```bash
+make build
 ```
 
 等价命令（直接走 Tauri CLI）：
@@ -54,6 +86,33 @@ cargo tauri build
 构建产物目录：
 
 - `src-tauri/target/release/bundle/`
+
+## 常用维护命令
+
+代码检查：
+
+```bash
+make lint
+make test
+```
+
+环境排查：
+
+```bash
+make doctor
+```
+
+清理构建产物：
+
+```bash
+make clean
+```
+
+仅清理大体积本地缓存：
+
+```bash
+make prune
+```
 
 ## 上游仓库策略
 
