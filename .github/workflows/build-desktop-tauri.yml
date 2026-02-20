@@ -287,6 +287,8 @@ jobs:
           rw_dmg_image_prefix='/src-tauri/target/'
           rw_dmg_image_suffix_regex='/bundle/macos/rw\\..*\\.dmg$'
           log_file=""
+          workspace_root="${GITHUB_WORKSPACE:-$(pwd)}"
+          workspace_root="${workspace_root%/}"
 
           cleanup_log_file() {
             if [ -n "${log_file:-}" ]; then
@@ -307,13 +309,11 @@ jobs:
               sleep "${detach_sleep_seconds}"
               pass=$((pass + 1))
             done
+            echo "WARN: Failed to detach ${target} after ${detach_attempts} attempts" >&2
             return 1
           }
 
           cleanup_stale_dmg_state() {
-            local workspace_root
-            workspace_root="$(pwd)"
-
             local dmg_mounts
             dmg_mounts="$(mount | awk '$3 ~ /^\/Volumes\/dmg\./ { print $3 }' || true)"
             if [ -n "${dmg_mounts}" ]; then
@@ -341,7 +341,7 @@ jobs:
                 next
               }
               /^=+/ {
-                if (index(image, root image_prefix) > 0 &&
+                if (index(image, root image_prefix) == 1 &&
                     image ~ image_suffix_re &&
                     dev != "") {
                   print dev
@@ -351,7 +351,7 @@ jobs:
                 next
               }
               END {
-                if (index(image, root image_prefix) > 0 &&
+                if (index(image, root image_prefix) == 1 &&
                     image ~ image_suffix_re &&
                     dev != "") {
                   print dev
@@ -367,13 +367,51 @@ jobs:
               done <<< "${workspace_disks}"
             fi
 
-            # Avoid broad process kills; only target likely disk image helper binaries.
+            # Prefer process IDs linked to this workspace's RW DMG images.
             local helper_pids
-            helper_pids="$(
-              pgrep -f '/System/Library/PrivateFrameworks/.*/diskimages-helper' || true
-              pgrep -f '/usr/libexec/diskimages-helper' || true
-              pgrep -f 'diskimages-help' || true
-            )"
+            helper_pids="$(hdiutil info 2>/dev/null | awk \
+              -v root="${workspace_root}" \
+              -v image_prefix="${rw_dmg_image_prefix}" \
+              -v image_suffix_re="${rw_dmg_image_suffix_regex}" '
+              BEGIN { image = ""; pid = "" }
+              /^image-path[[:space:]]*:/ {
+                line = $0
+                sub(/^image-path[[:space:]]*:[[:space:]]*/, "", line)
+                image = line
+                next
+              }
+              /^process ID[[:space:]]*:/ {
+                line = $0
+                sub(/^process ID[[:space:]]*:[[:space:]]*/, "", line)
+                pid = line
+                next
+              }
+              /^=+/ {
+                if (index(image, root image_prefix) == 1 &&
+                    image ~ image_suffix_re &&
+                    pid ~ /^[0-9]+$/) {
+                  print pid
+                }
+                image = ""
+                pid = ""
+                next
+              }
+              END {
+                if (index(image, root image_prefix) == 1 &&
+                    image ~ image_suffix_re &&
+                    pid ~ /^[0-9]+$/) {
+                  print pid
+                }
+              }
+            ' | sort -u)"
+
+            # Fallback: exact process-name match only, avoid broad -f substring patterns.
+            if [ -z "${helper_pids}" ]; then
+              helper_pids="$(
+                pgrep -x diskimages-helper || true
+                pgrep -x diskimages-help || true
+              )"
+            fi
             helper_pids="$(printf '%s\n' "${helper_pids}" | awk 'NF' | sort -u)"
             if [ -n "${helper_pids}" ]; then
               while IFS= read -r pid; do
