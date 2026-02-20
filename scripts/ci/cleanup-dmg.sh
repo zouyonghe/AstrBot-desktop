@@ -176,6 +176,22 @@ canonicalize_path() {
 workspace_root_canonical="$(canonicalize_path "${workspace_root}")"
 workspace_root_canonical="${workspace_root_canonical%/}"
 
+log_cleanup_configuration() {
+  echo "DMG cleanup configuration:" >&2
+  echo "  workspace_root=${workspace_root}" >&2
+  echo "  workspace_root_canonical=${workspace_root_canonical}" >&2
+  echo "  strict_workspace_root=${strict_workspace_root}" >&2
+  echo "  canonicalize_tool=${canonicalize_tool}" >&2
+  echo "  detach_attempts=${detach_attempts}" >&2
+  echo "  detach_sleep_seconds=${detach_sleep_seconds}" >&2
+  echo "  rw_dmg_image_prefix=${rw_dmg_image_prefix}" >&2
+  echo "  rw_dmg_image_suffix_regex=${rw_dmg_image_suffix_regex}" >&2
+  echo "  rw_dmg_mountpoint_regex=${rw_dmg_mountpoint_regex}" >&2
+  echo "  allow_global_helper_cleanup=${allow_global_helper_cleanup}" >&2
+}
+
+log_cleanup_configuration
+
 is_workspace_rw_dmg_image() {
   local image="$1"
   local normalized_image
