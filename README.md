@@ -21,11 +21,12 @@ AstrBot 桌面应用（Tauri）。
 
 如果你只想使用软件，不需要本地构建，请直接从 Releases 下载对应系统的安装包：
 
-[`Releases`](./releases/latest)
+[`Releases`](https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest)
 
 ## 手动构建
 
 适用于需要调试桌面应用、切换上游分支或验证本地改动的场景。
+推荐优先使用 `make` 命令，仓库已封装常用流程。
 
 ### 1. 查看可用命令（推荐）
 
@@ -38,13 +39,13 @@ make help
 ### 2. 安装依赖
 
 ```bash
-pnpm install
+make deps
 ```
 
 也可以使用：
 
 ```bash
-make deps
+pnpm install
 ```
 
 ### 3. 准备资源
@@ -53,28 +54,34 @@ make deps
 make prepare
 ```
 
-### 4. 本地开发运行
+也可以使用：
 
 ```bash
-pnpm run dev
+pnpm run prepare:resources
 ```
 
-也可以使用：
+### 4. 本地开发运行
 
 ```bash
 make dev
 ```
 
+也可以使用：
+
+```bash
+pnpm run dev
+```
+
 ### 5. 构建安装包
 
 ```bash
-pnpm run build
+make build
 ```
 
 也可以使用：
 
 ```bash
-make build
+pnpm run build
 ```
 
 等价命令（直接使用 Tauri CLI）：
@@ -86,6 +93,7 @@ cargo tauri build
 构建产物目录：
 
 - `src-tauri/target/release/bundle/`
+- 若使用 `--target` 显式指定目标（例如 CI 的 macOS 构建），产物目录为 `src-tauri/target/<target-triple>/release/bundle/`
 
 ## 常用维护命令
 
