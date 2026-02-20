@@ -7,12 +7,14 @@ RESOURCES_BACKEND_DIR ?= $(RESOURCES_DIR)/backend
 RESOURCES_WEBUI_DIR ?= $(RESOURCES_DIR)/webui
 ASTRBOT_LOCAL_DIR ?= $(VENDOR_DIR)/AstrBot-local
 ASTRBOT_LOCAL_DESKTOP_DIR ?= $(ASTRBOT_LOCAL_DIR)/desktop
+ASTRBOT_SOURCE_GIT_URL ?= https://github.com/AstrBotDevs/AstrBot.git
+ASTRBOT_SOURCE_GIT_REF ?= master
 RUST_MANIFEST ?= src-tauri/Cargo.toml
 NODE_MODULES_DIR ?= node_modules
 PNPM_STORE_DIR ?= .pnpm-store
 TAURI_TARGET_DIR ?= src-tauri/target
 
-.PHONY: help deps sync-version prepare-webui prepare-backend prepare-resources dev build \
+.PHONY: help deps sync-version update prepare-webui prepare-backend prepare-resources dev build \
 	prepare rebuild lint test doctor prune size clean clean-rust clean-resources \
 	clean-vendor-local clean-vendor clean-node clean-all
 
@@ -21,6 +23,7 @@ help:
 	@echo ""
 	@echo "  make deps               Install JS dependencies"
 	@echo "  make sync-version       Sync desktop version from AstrBot source"
+	@echo "  make update             Sync desktop version from upstream AstrBot"
 	@echo "  make prepare            Alias of prepare-resources"
 	@echo "  make prepare-webui      Build and sync WebUI resources"
 	@echo "  make prepare-backend    Build and sync backend runtime resources"
@@ -46,6 +49,13 @@ deps:
 	pnpm install
 
 sync-version:
+	pnpm run sync:version
+
+update:
+	ASTRBOT_SOURCE_DIR= \
+	ASTRBOT_SOURCE_GIT_URL=$(ASTRBOT_SOURCE_GIT_URL) \
+	ASTRBOT_SOURCE_GIT_REF=$(ASTRBOT_SOURCE_GIT_REF) \
+	ASTRBOT_DESKTOP_VERSION=$(ASTRBOT_DESKTOP_VERSION) \
 	pnpm run sync:version
 
 prepare-webui:

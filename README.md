@@ -125,6 +125,34 @@ make clean
 make prune
 ```
 
+## 版本维护（重要）
+
+桌面端版本会同步到以下三个文件：
+
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+
+### `make sync-version` 与 `make update` 的区别
+
+- `make sync-version`：从当前解析到的 AstrBot 源同步版本，受本地环境变量影响（例如 `ASTRBOT_SOURCE_DIR`）。
+- `make update`：用于“对齐上游”，会忽略 `ASTRBOT_SOURCE_DIR`，并使用 `ASTRBOT_SOURCE_GIT_URL` + `ASTRBOT_SOURCE_GIT_REF` 同步版本。
+
+推荐日常使用 `make update`，避免本地切分支导致版本漂移。
+
+示例：
+
+```bash
+# 同步到上游 master
+make update
+
+# 同步到指定上游 tag
+make update ASTRBOT_SOURCE_GIT_REF=v4.17.5
+
+# 强制写入指定版本（通常用于 CI）
+make update ASTRBOT_DESKTOP_VERSION=4.17.5
+```
+
 ## 上游仓库策略
 
 默认上游仓库：
@@ -150,6 +178,13 @@ export ASTRBOT_SOURCE_DIR=/path/to/AstrBot
 export ASTRBOT_SOURCE_GIT_URL=https://github.com/zouyonghe/AstrBot.git
 export ASTRBOT_SOURCE_GIT_REF=cpython-runtime-refactor
 ```
+
+## CI 版本同步策略
+
+`build-desktop-tauri` 工作流在定时任务（`schedule`）检测到上游新 tag 且需要构建时，会先自动同步并提交上述三个版本文件，然后继续构建产物。
+
+- 定时构建：会自动回写版本到仓库（commit + push）。
+- 手动触发（`workflow_dispatch`）：默认只构建，不自动回写版本文件。
 
 ## 构建流程说明
 

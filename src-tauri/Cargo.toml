@@ -1,6 +1,6 @@
 [package]
 name = "astrbot-desktop-tauri"
-version = "4.17.5"
+version = "4.17.6"
 description = "AstrBot desktop shell powered by Tauri"
 authors = ["AstrBot"]
 license = "AGPL-3.0"

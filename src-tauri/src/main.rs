@@ -103,6 +103,8 @@ struct BackendState {
     is_quitting: AtomicBool,
     is_spawning: AtomicBool,
     is_restarting: AtomicBool,
+    exit_cleanup_started: AtomicBool,
+    exit_allowed: AtomicBool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -137,7 +139,6 @@ enum GracefulRestartOutcome {
 #[derive(Debug, Clone, Copy)]
 struct TrayOriginDecision {
     uses_backend_origin: bool,
-    should_log_mismatch: bool,
 }
 
 struct AtomicFlagGuard<'a> {
@@ -171,6 +172,8 @@ impl Default for BackendState {
             is_quitting: AtomicBool::new(false),
             is_spawning: AtomicBool::new(false),
             is_restarting: AtomicBool::new(false),
+            exit_cleanup_started: AtomicBool::new(false),
+            exit_allowed: AtomicBool::new(false),
         }
     }
 }
@@ -1050,6 +1053,20 @@ Content-Length: {}\r\n\
     fn is_quitting(&self) -> bool {
         self.is_quitting.load(Ordering::Relaxed)
     }
+
+    fn is_exit_allowed(&self) -> bool {
+        self.exit_allowed.load(Ordering::Relaxed)
+    }
+
+    fn try_begin_exit_cleanup(&self) -> bool {
+        self.exit_cleanup_started
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    fn allow_exit(&self) {
+        self.exit_allowed.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
@@ -1239,21 +1256,46 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {
-            RunEvent::ExitRequested { .. } => {
+            RunEvent::ExitRequested { api, .. } => {
                 let state = app_handle.state::<BackendState>();
+                if state.is_exit_allowed() {
+                    return;
+                }
+
+                api.prevent_exit();
                 state.mark_quitting();
-                if let Err(error) = state.stop_backend() {
-                    append_desktop_log(&format!(
-                        "backend graceful stop on ExitRequested failed: {error}"
-                    ));
+                if !state.try_begin_exit_cleanup() {
+                    append_desktop_log("exit requested while backend cleanup is already running");
+                    return;
                 }
+
+                append_desktop_log("exit requested, stopping backend asynchronously");
+                let app_handle_cloned = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let worker_handle = app_handle_cloned.clone();
+                    let stop_result = tauri::async_runtime::spawn_blocking(move || {
+                        let state = worker_handle.state::<BackendState>();
+                        state.stop_backend()
+                    })
+                    .await;
+
+                    match stop_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => append_desktop_log(&format!(
+                            "backend graceful stop on ExitRequested failed: {error}"
+                        )),
+                        Err(error) => append_desktop_log(&format!(
+                            "backend graceful stop task failed on ExitRequested: {error}"
+                        )),
+                    }
+
+                    let state = app_handle_cloned.state::<BackendState>();
+                    state.allow_exit();
+                    append_desktop_log("backend stop finished, exiting desktop process");
+                    app_handle_cloned.exit(0);
+                });
             }
-            RunEvent::Exit => {
-                let state = app_handle.state::<BackendState>();
-                if let Err(error) = state.stop_backend() {
-                    append_desktop_log(&format!("backend graceful stop on Exit failed: {error}"));
-                }
-            }
+            RunEvent::Exit => {}
             _ => {}
         });
 }
@@ -1365,10 +1407,6 @@ fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
         TRAY_MENU_RESTART_BACKEND => {
             append_desktop_log("tray requested backend restart");
             show_main_window(app_handle);
-            if main_window_uses_backend_origin(app_handle) {
-                emit_tray_restart_backend_event(app_handle);
-                return;
-            }
 
             let app_handle_cloned = app_handle.clone();
             thread::spawn(move || match do_restart_backend(&app_handle_cloned, None) {
@@ -1387,51 +1425,6 @@ fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
             app_handle.exit(0);
         }
         _ => {}
-    }
-}
-
-fn main_window_uses_backend_origin(app_handle: &AppHandle) -> bool {
-    let Some(window) = app_handle.get_webview_window("main") else {
-        return false;
-    };
-    let Ok(window_url) = window.url() else {
-        return false;
-    };
-    let state = app_handle.state::<BackendState>();
-    let Ok(backend_url) = Url::parse(&state.backend_url) else {
-        return false;
-    };
-    let decision = tray_origin_decision(&backend_url, &window_url);
-    if !decision.uses_backend_origin && decision.should_log_mismatch {
-        append_desktop_log(&format!(
-            "tray restart fallback to desktop-managed flow due to origin mismatch: backend={} window={}",
-            backend_url, window_url
-        ));
-    }
-    decision.uses_backend_origin
-}
-
-fn emit_tray_restart_backend_event(app_handle: &AppHandle) {
-    let Some(window) = app_handle.get_webview_window("main") else {
-        return;
-    };
-
-    let script = r#"
-(() => {
-  if (typeof window.__astrbotDesktopEmitTrayRestart === 'function') {
-    window.__astrbotDesktopEmitTrayRestart();
-    return;
-  }
-  const state =
-    window.__astrbotDesktopTrayRestartState ||
-    (window.__astrbotDesktopTrayRestartState = { handlers: new Set(), pending: 0 });
-  state.pending = Number(state.pending || 0) + 1;
-})();
-"#;
-    if let Err(error) = window.eval(script) {
-        append_desktop_log(&format!(
-            "failed to emit tray restart backend event to webview: {error}"
-        ));
     }
 }
 
@@ -1983,7 +1976,6 @@ fn tray_origin_decision(backend_url: &Url, window_url: &Url) -> TrayOriginDecisi
     if same_origin(backend_url, window_url) {
         return TrayOriginDecision {
             uses_backend_origin: true,
-            should_log_mismatch: false,
         };
     }
     let backend_scheme = backend_url.scheme();
@@ -1991,7 +1983,6 @@ fn tray_origin_decision(backend_url: &Url, window_url: &Url) -> TrayOriginDecisi
     if !matches!(backend_scheme, "http" | "https") || !matches!(window_scheme, "http" | "https") {
         return TrayOriginDecision {
             uses_backend_origin: false,
-            should_log_mismatch: false,
         };
     }
 
@@ -2000,14 +1991,12 @@ fn tray_origin_decision(backend_url: &Url, window_url: &Url) -> TrayOriginDecisi
     if !loopback_http {
         return TrayOriginDecision {
             uses_backend_origin: false,
-            should_log_mismatch: false,
         };
     }
 
     let same_port = backend_url.port_or_known_default() == window_url.port_or_known_default();
     TrayOriginDecision {
         uses_backend_origin: same_port,
-        should_log_mismatch: !same_port,
     }
 }
 

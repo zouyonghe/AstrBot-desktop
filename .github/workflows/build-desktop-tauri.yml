@@ -98,13 +98,18 @@ jobs:
 
           version=""
           if [ "${should_build}" = "true" ]; then
-            workdir="$(mktemp -d)"
-            repo_dir="${workdir}/AstrBot"
-            git init "${repo_dir}"
-            git -C "${repo_dir}" remote add origin "${source_git_url}"
-            git -C "${repo_dir}" fetch --depth 1 origin "${source_git_ref}"
-            git -C "${repo_dir}" checkout --detach FETCH_HEAD
-            version="$(python3 scripts/ci/read-project-version.py "${repo_dir}/pyproject.toml")"
+            if printf '%s' "${source_git_ref}" | grep -Eq '^v[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$'; then
+              version="${source_git_ref#v}"
+              echo "Resolved version directly from source tag: ${source_git_ref}"
+            else
+              workdir="$(mktemp -d)"
+              repo_dir="${workdir}/AstrBot"
+              git init "${repo_dir}"
+              git -C "${repo_dir}" remote add origin "${source_git_url}"
+              git -C "${repo_dir}" fetch --depth 1 origin "${source_git_ref}"
+              git -C "${repo_dir}" checkout --detach FETCH_HEAD
+              version="$(python3 scripts/ci/read-project-version.py "${repo_dir}/pyproject.toml")"
+            fi
           else
             version="${source_git_ref#v}"
             if [ -z "${version}" ] || [ "${version}" = "${source_git_ref}" ]; then
@@ -122,8 +127,59 @@ jobs:
           echo "Resolved AstrBot version: ${version}"
           echo "Build enabled: ${should_build}"
 
-  build-linux:
+  sync_repo_version:
+    name: Sync Repository Version
     needs: resolve_build_context
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup Toolchains
+        uses: ./.github/actions/setup-toolchains
+        with:
+          setup-python: 'false'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4.2.0
+        with:
+          version: 10.28.2
+
+      - name: Sync desktop version to upstream tag
+        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
+        env:
+          ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
+          ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        run: make update
+
+      - name: Commit and push version files
+        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
+        env:
+          ASTRBOT_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        run: |
+          set -euo pipefail
+
+          changed_files="$(git status --porcelain -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json)"
+          if [ -z "${changed_files}" ]; then
+            echo "Version files are already up to date. Nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git commit -m "chore(version): sync desktop version to v${ASTRBOT_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  build-linux:
+    needs:
+      - resolve_build_context
+      - sync_repo_version
     if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
     name: linux-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -157,6 +213,7 @@ jobs:
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: cargo tauri build --bundles deb,rpm
@@ -171,7 +228,9 @@ jobs:
             src-tauri/target/release/bundle/**/*.rpm
 
   build-macos:
-    needs: resolve_build_context
+    needs:
+      - resolve_build_context
+      - sync_repo_version
     if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
     name: macos-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -199,6 +258,7 @@ jobs:
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -339,7 +399,9 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
 
   build-windows:
-    needs: resolve_build_context
+    needs:
+      - resolve_build_context
+      - sync_repo_version
     if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
     name: windows-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -367,6 +429,7 @@ jobs:
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
