@@ -1271,7 +1271,18 @@ fn main() {
                     app_handle_cloned.exit(0);
                 });
             }
-            RunEvent::Exit => {}
+            RunEvent::Exit => {
+                let state = app_handle.state::<BackendState>();
+                state.mark_quitting();
+                if !state.try_begin_exit_cleanup() {
+                    return;
+                }
+
+                append_desktop_log("exit event triggered fallback backend cleanup");
+                if let Err(error) = state.stop_backend() {
+                    append_desktop_log(&format!("backend fallback stop on Exit failed: {error}"));
+                }
+            }
             _ => {}
         });
 }
