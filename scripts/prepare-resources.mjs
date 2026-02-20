@@ -289,7 +289,10 @@ const verifyDesktopBridgeArtifacts = async (dashboardDir) => {
     const mustPass = expectation.required || isDesktopBridgeExpectationStrict;
     const file = path.join(dashboardDir, ...expectation.filePath);
     if (!existsSync(file)) {
-      const message = `[prepare-resources] Missing required file for ${expectation.label}: ${path.relative(projectRoot, file)}`;
+      const relativePath = path.relative(projectRoot, file);
+      const message = mustPass
+        ? `[prepare-resources] Missing required file for ${expectation.label}: ${relativePath}`
+        : `[prepare-resources] Missing optional (best-effort) file for ${expectation.label}: ${relativePath}`;
       if (mustPass) {
         issues.push(message);
       } else {
