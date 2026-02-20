@@ -1662,27 +1662,40 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE: &str = r#"
   };
 
   const createEventListener = async (eventName, handler) => {
-    if (typeof tauriEvent?.listen === 'function') {
+    const hasGlobalEventListenerApi = typeof tauriEvent?.listen === 'function';
+    const hasPluginEventListenerApi =
+      typeof invoke === 'function' && typeof transformCallback === 'function';
+
+    if (hasGlobalEventListenerApi) {
       return tauriEvent.listen(eventName, handler);
     }
-    if (typeof transformCallback !== 'function') {
-      throw new Error('transformCallback is unavailable');
+    if (!hasPluginEventListenerApi) {
+      throw new Error(
+        'No supported Tauri event listener API: expected tauriEvent.listen or __TAURI_INTERNALS__.invoke + transformCallback'
+      );
     }
 
-    const eventId = await invoke('plugin:event|listen', {
-      event: eventName,
-      target: { kind: 'Any' },
-      handler: transformCallback(handler),
-    });
+    let eventId;
+    try {
+      eventId = await invoke('plugin:event|listen', {
+        event: eventName,
+        target: { kind: 'Any' },
+        handler: transformCallback(handler),
+      });
+    } catch (error) {
+      throw new Error(`plugin:event|listen failed: ${String(error)}`);
+    }
 
     return async () => {
       try {
         window.__TAURI_EVENT_PLUGIN_INTERNALS__?.unregisterListener?.(eventName, eventId);
       } catch {}
-      await invoke('plugin:event|unlisten', {
-        event: eventName,
-        eventId,
-      });
+      try {
+        await invoke('plugin:event|unlisten', {
+          event: eventName,
+          eventId,
+        });
+      } catch {}
     };
   };
 
