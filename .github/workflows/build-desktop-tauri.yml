@@ -130,30 +130,28 @@ jobs:
   sync_repo_version:
     name: Sync Repository Version
     needs: resolve_build_context
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout branch
-        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
         uses: actions/checkout@v6.0.2
         with:
+          fetch-depth: 0
           ref: ${{ github.ref_name }}
 
       - name: Setup Toolchains
-        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
         uses: ./.github/actions/setup-toolchains
         with:
           setup-python: 'false'
 
       - name: Setup pnpm
-        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
         uses: pnpm/action-setup@v4.2.0
         with:
           version: 10.28.2
 
       - name: Sync desktop version to upstream tag
-        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
@@ -161,7 +159,6 @@ jobs:
         run: make update
 
       - name: Commit and push version files
-        if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && github.event_name == 'schedule' }}
         env:
           ASTRBOT_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
           TARGET_REF_NAME: ${{ github.ref_name }}
@@ -178,13 +175,24 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
           git commit -m "chore(version): sync desktop version to v${ASTRBOT_VERSION}"
-          git push origin "HEAD:${TARGET_REF_NAME}"
+
+          git fetch origin "${TARGET_REF_NAME}"
+          if ! git pull --rebase origin "${TARGET_REF_NAME}"; then
+            echo "::warning::Failed to rebase onto origin/${TARGET_REF_NAME}. Skipping push to avoid noisy failures."
+            git rebase --abort || true
+            exit 0
+          fi
+
+          if ! git push origin "HEAD:${TARGET_REF_NAME}"; then
+            echo "::warning::Push to ${TARGET_REF_NAME} was rejected (likely branch protection or race). Skipping."
+            exit 0
+          fi
 
   build-linux:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: linux-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -235,7 +243,7 @@ jobs:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: macos-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -406,7 +414,7 @@ jobs:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' }}
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: windows-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     env:

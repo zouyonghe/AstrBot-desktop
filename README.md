@@ -138,7 +138,7 @@ make prune
 - `make sync-version`：从当前解析到的 AstrBot 源同步版本，受本地环境变量影响（例如 `ASTRBOT_SOURCE_DIR`）。
 - `make update`：用于“对齐上游”，会忽略 `ASTRBOT_SOURCE_DIR`，并使用 `ASTRBOT_SOURCE_GIT_URL` + `ASTRBOT_SOURCE_GIT_REF` 同步版本。
 
-推荐日常使用 `make update`，避免本地切分支导致版本漂移。
+推荐日常使用 `make update`，避免本地切换分支导致版本漂移。
 
 示例：
 

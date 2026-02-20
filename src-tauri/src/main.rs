@@ -1065,11 +1065,6 @@ fn desktop_bridge_is_desktop_runtime() -> bool {
 }
 
 #[tauri::command]
-fn desktop_bridge_is_electron_runtime() -> bool {
-    desktop_bridge_is_desktop_runtime()
-}
-
-#[tauri::command]
 fn desktop_bridge_get_backend_state(app_handle: AppHandle) -> BackendBridgeState {
     let state = app_handle.state::<BackendState>();
     state.bridge_state(&app_handle)
@@ -1154,7 +1149,6 @@ fn main() {
         .manage(BackendState::default())
         .invoke_handler(tauri::generate_handler![
             desktop_bridge_is_desktop_runtime,
-            desktop_bridge_is_electron_runtime,
             desktop_bridge_get_backend_state,
             desktop_bridge_set_auth_token,
             desktop_bridge_restart_backend,
@@ -1625,7 +1619,6 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 
   const BRIDGE_COMMANDS = Object.freeze({
     IS_DESKTOP_RUNTIME: 'desktop_bridge_is_desktop_runtime',
-    IS_ELECTRON_RUNTIME: 'desktop_bridge_is_electron_runtime',
     GET_BACKEND_STATE: 'desktop_bridge_get_backend_state',
     SET_AUTH_TOKEN: 'desktop_bridge_set_auth_token',
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
@@ -1923,10 +1916,6 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     isDesktop: true,
     isDesktopRuntime: () =>
       isRuntimeBridgeEnabled(BRIDGE_COMMANDS.IS_DESKTOP_RUNTIME, true),
-    // Legacy aliases for current dashboard compatibility.
-    isElectron: true,
-    isElectronRuntime: () =>
-      isRuntimeBridgeEnabled(BRIDGE_COMMANDS.IS_ELECTRON_RUNTIME, true),
     getBackendState: () => invokeBridge(BRIDGE_COMMANDS.GET_BACKEND_STATE),
     restartBackend: async (authToken = null) => {
       const normalizedToken =
