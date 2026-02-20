@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
     thread,
@@ -66,6 +66,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 static BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static BRIDGE_BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -1422,10 +1423,22 @@ fn emit_tray_restart_backend_event(app_handle: &AppHandle) {
         append_desktop_log("tray restart event skipped: main window not found");
         return;
     };
+    let token = TRAY_RESTART_SIGNAL_TOKEN.fetch_add(1, Ordering::Relaxed) + 1;
 
-    if let Err(error) = window.emit(TRAY_RESTART_BACKEND_EVENT, ()) {
+    if let Err(error) = window.emit(TRAY_RESTART_BACKEND_EVENT, token) {
         append_desktop_log(&format!(
             "failed to emit tray restart backend event: {error}"
+        ));
+    }
+
+    // Compatibility fallback when the JS Tauri event listener API is unavailable.
+    // The same token is used so JS can deduplicate if both paths are delivered.
+    let fallback_script = format!(
+        "if (typeof window !== 'undefined' && typeof window.__astrbotDesktopEmitTrayRestart === 'function') {{ window.__astrbotDesktopEmitTrayRestart({token}); }}"
+    );
+    if let Err(error) = window.eval(&fallback_script) {
+        append_desktop_log(&format!(
+            "failed to eval tray restart backend fallback emit: {error}"
         ));
     }
 }
@@ -1663,13 +1676,28 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE: &str = r#"
     (window.__astrbotDesktopTrayRestartState = {
       handlers: new Set(),
       pending: 0,
+      lastToken: 0,
       unlistenTrayRestartBackendEvent: null
     });
+  if (
+    typeof trayRestartState.lastToken !== 'number' ||
+    !Number.isFinite(trayRestartState.lastToken)
+  ) {
+    trayRestartState.lastToken = 0;
+  }
   if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'undefined') {
     trayRestartState.unlistenTrayRestartBackendEvent = null;
   }
 
-  const emitTrayRestart = () => {
+  const emitTrayRestart = (token = null) => {
+    const numericToken = Number(token);
+    if (Number.isFinite(numericToken) && numericToken > 0) {
+      if (numericToken <= trayRestartState.lastToken) return;
+      trayRestartState.lastToken = numericToken;
+    } else {
+      trayRestartState.lastToken += 1;
+    }
+
     if (trayRestartState.handlers.size === 0) {
       trayRestartState.pending = Number(trayRestartState.pending || 0) + 1;
       return;
@@ -1680,6 +1708,7 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE: &str = r#"
       } catch {}
     }
   };
+  window.__astrbotDesktopEmitTrayRestart = (token) => emitTrayRestart(token);
 
   const onTrayRestartBackend = (callback) => {
     if (typeof callback !== 'function') return () => {};
@@ -1700,8 +1729,8 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE: &str = r#"
     }
     if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'function') return;
     try {
-      const unlisten = await listen(TRAY_RESTART_BACKEND_EVENT, () => {
-        emitTrayRestart();
+      const unlisten = await listen(TRAY_RESTART_BACKEND_EVENT, (event) => {
+        emitTrayRestart(event?.payload);
       });
       if (typeof unlisten === 'function') {
         trayRestartState.unlistenTrayRestartBackendEvent = unlisten;
