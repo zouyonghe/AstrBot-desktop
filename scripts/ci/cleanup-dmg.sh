@@ -2,6 +2,15 @@
 
 set -uo pipefail
 
+# Best-effort cleanup for stale writable DMG state during macOS packaging.
+# Invariants:
+# - Cleanup is workspace-scoped: only images under "${workspace_root}${rw_dmg_image_prefix}"
+#   that also match rw_dmg_image_suffix_regex are considered workspace-owned.
+# - Canonicalized-path matching is used as a fallback when hdiutil reports resolved paths.
+# - Global helper process cleanup is opt-in via ASTRBOT_DESKTOP_MACOS_ALLOW_GLOBAL_HELPER_KILL=1.
+# - Workspace-root resolution can be strict (error) or permissive (warn+skip), controlled by
+#   ASTRBOT_DESKTOP_MACOS_STRICT_WORKSPACE_ROOT (defaults to strict outside GitHub Actions).
+
 detach_attempts="${ASTRBOT_DESKTOP_MACOS_DETACH_ATTEMPTS:-3}"
 detach_sleep_seconds="${ASTRBOT_DESKTOP_MACOS_DETACH_SLEEP_SECONDS:-2}"
 
@@ -56,20 +65,31 @@ fail_or_skip_workspace_root() {
   return 0
 }
 
-if [ -n "${ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT:-}" ]; then
-  workspace_root="${ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT}"
-elif [ -n "${GITHUB_WORKSPACE:-}" ]; then
-  workspace_root="${GITHUB_WORKSPACE}"
-else
-  if ! fail_or_skip_workspace_root \
-    "ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT is required outside GitHub Actions"; then
-    exit 1
+resolve_workspace_root() {
+  local candidate_root=""
+
+  if [ -n "${ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT:-}" ]; then
+    candidate_root="${ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT}"
+  elif [ -n "${GITHUB_WORKSPACE:-}" ]; then
+    candidate_root="${GITHUB_WORKSPACE}"
+  else
+    fail_or_skip_workspace_root \
+      "ASTRBOT_DESKTOP_MACOS_WORKSPACE_ROOT is required outside GitHub Actions"
+    return $?
   fi
-  exit 0
-fi
-workspace_root="${workspace_root%/}"
-if [ -z "${workspace_root}" ] || [ ! -d "${workspace_root}" ]; then
-  if ! fail_or_skip_workspace_root "workspace root is invalid (${workspace_root})"; then
+
+  candidate_root="${candidate_root%/}"
+  if [ -z "${candidate_root}" ] || [ ! -d "${candidate_root}" ]; then
+    fail_or_skip_workspace_root "workspace root is invalid (${candidate_root})"
+    return $?
+  fi
+
+  workspace_root="${candidate_root}"
+  return 0
+}
+
+if ! resolve_workspace_root; then
+  if [ "${strict_workspace_root}" = "1" ]; then
     exit 1
   fi
   exit 0
@@ -80,15 +100,24 @@ declare -a canonical_path_cache_values=()
 canonicalize_tool="none"
 canonicalize_warned_failure=0
 
-if command -v realpath >/dev/null 2>&1; then
-  canonicalize_tool="realpath"
-elif command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
-  canonicalize_tool="readlink"
-elif command -v python3 >/dev/null 2>&1; then
-  canonicalize_tool="python3"
-else
+select_canonicalize_tool() {
+  if command -v realpath >/dev/null 2>&1; then
+    canonicalize_tool="realpath"
+    return
+  fi
+  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+    canonicalize_tool="readlink"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    canonicalize_tool="python3"
+    return
+  fi
+  canonicalize_tool="none"
   echo "WARN: no realpath/readlink/python3 available; path canonicalization disabled" >&2
-fi
+}
+
+select_canonicalize_tool
 
 detach_target() {
   local target="$1"

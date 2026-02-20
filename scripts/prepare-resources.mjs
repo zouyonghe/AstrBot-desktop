@@ -211,23 +211,66 @@ const patchMonacoCssNestingWarnings = async (dashboardDir) => {
 
 const patchLegacyDesktopBridgeArtifacts = async (dashboardDir) => {
   const patchFile = async (filePath, transform, patchLabel, options = {}) => {
-    const { warnOnNoChange = false } = options;
+    const {
+      warnOnNoChange = false,
+      failOnNoChange = false,
+      noChangeAllowedWhen = null,
+      assertPatched = null,
+      requireFile = false,
+    } = options;
+
     if (!existsSync(filePath)) {
+      if (requireFile) {
+        throw new Error(
+          `[prepare-resources] Missing required file for ${patchLabel}: ${path.relative(projectRoot, filePath)}`,
+        );
+      }
       return;
     }
+
     const source = await readFile(filePath, 'utf8');
     const patched = transform(source);
+
+    if (assertPatched && !assertPatched(patched)) {
+      throw new Error(
+        `[prepare-resources] ${patchLabel} failed invariant check in ${path.relative(projectRoot, filePath)}`,
+      );
+    }
+
     if (patched !== source) {
       await writeFile(filePath, patched, 'utf8');
       console.log(
         `[prepare-resources] Patched ${patchLabel} in ${path.relative(projectRoot, filePath)}`,
       );
-    } else if (warnOnNoChange) {
+      return;
+    }
+
+    const allowNoChange = noChangeAllowedWhen ? noChangeAllowedWhen(source) : false;
+    if (failOnNoChange && !allowNoChange) {
+      throw new Error(
+        `[prepare-resources] ${patchLabel} did not match expected legacy pattern in ${path.relative(projectRoot, filePath)}`,
+      );
+    }
+
+    if (warnOnNoChange) {
+      const suffix = allowNoChange ? ' (already compatible)' : '';
       console.warn(
-        `[prepare-resources] WARN: No changes applied for ${patchLabel} in ${path.relative(projectRoot, filePath)}`,
+        `[prepare-resources] WARN: No changes applied for ${patchLabel} in ${path.relative(projectRoot, filePath)}${suffix}`,
       );
     }
   };
+
+  const hasModernTrayRestartGuard = (source) =>
+    /if\s*\(\s*!desktopBridge\?\.onTrayRestartBackend\s*\)\s*\{/.test(source);
+  const hasModernDesktopBridgeTypes = (source) =>
+    /^\s+isDesktop:\s*boolean;\n/m.test(source) &&
+    /^\s+isDesktopRuntime:\s*\(\)\s*=>\s*Promise<boolean>;\n/m.test(source);
+  const hasLegacyDesktopReleaseGuards = (source) =>
+    /\bisElectronApp\b/.test(source) ||
+    /window\.astrbotDesktop\?\.isElectron/.test(source) ||
+    /window\.astrbotDesktop\?\.isElectronRuntime\?\.\(\)/.test(source);
+  const hasModernRestartCapabilityGuard = (source) =>
+    source.includes('const hasDesktopRestartCapability =');
 
   await patchFile(
     path.join(dashboardDir, 'src', 'App.vue'),
@@ -237,7 +280,13 @@ const patchLegacyDesktopBridgeArtifacts = async (dashboardDir) => {
         'if (!desktopBridge?.onTrayRestartBackend) {',
       ),
     'tray restart desktop guard',
-    { warnOnNoChange: true },
+    {
+      warnOnNoChange: true,
+      failOnNoChange: true,
+      noChangeAllowedWhen: hasModernTrayRestartGuard,
+      assertPatched: hasModernTrayRestartGuard,
+      requireFile: true,
+    },
   );
 
   await patchFile(
@@ -252,7 +301,13 @@ const patchLegacyDesktopBridgeArtifacts = async (dashboardDir) => {
       return patched;
     },
     'desktop bridge type definitions',
-    { warnOnNoChange: true },
+    {
+      warnOnNoChange: true,
+      failOnNoChange: true,
+      noChangeAllowedWhen: hasModernDesktopBridgeTypes,
+      assertPatched: hasModernDesktopBridgeTypes,
+      requireFile: true,
+    },
   );
 
   await patchFile(
@@ -270,7 +325,13 @@ const patchLegacyDesktopBridgeArtifacts = async (dashboardDir) => {
       return patched;
     },
     'desktop update mode guards',
-    { warnOnNoChange: true },
+    {
+      warnOnNoChange: true,
+      failOnNoChange: true,
+      noChangeAllowedWhen: (source) => !hasLegacyDesktopReleaseGuards(source),
+      assertPatched: (source) => !hasLegacyDesktopReleaseGuards(source),
+      requireFile: true,
+    },
   );
 
   await patchFile(
@@ -299,7 +360,13 @@ const patchLegacyDesktopBridgeArtifacts = async (dashboardDir) => {
       );
     },
     'desktop restart capability guard',
-    { warnOnNoChange: true },
+    {
+      warnOnNoChange: true,
+      failOnNoChange: true,
+      noChangeAllowedWhen: hasModernRestartCapabilityGuard,
+      assertPatched: hasModernRestartCapabilityGuard,
+      requireFile: true,
+    },
   );
 };
 
