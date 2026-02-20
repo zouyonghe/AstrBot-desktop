@@ -208,7 +208,8 @@ jobs:
 
           max_attempts=2
           attempt=1
-          retry_pattern='bundle_dmg\.sh|hdiutil: detach: timeout for DiskArbitration expired|hdiutil: detach: drive not detached|failed to bundle project error running bundle_dmg\.sh'
+          # Match on stable error fragments so minor upstream wording changes do not disable retries.
+          retry_pattern='bundle_dmg|hdiutil: detach:.*timeout|hdiutil: detach:.*not detached|failed to bundle project'
 
           while [ "${attempt}" -le "${max_attempts}" ]; do
             log_file="$(mktemp -t tauri-macos-build.XXXXXX.log)"
@@ -239,9 +240,21 @@ jobs:
                 echo "Detaching ${mount_point}"
                 hdiutil detach "${mount_point}" || hdiutil detach -force "${mount_point}" || true
               done <<< "${dmg_mounts}"
-            fi
 
-            pkill -f diskimages-help || true
+              # Avoid broad pkill: only target likely disk image helper binaries.
+              helper_pids="$(
+                pgrep -f '/System/Library/PrivateFrameworks/.*/diskimages-helper' || true
+                pgrep -f '/usr/libexec/diskimages-helper' || true
+                pgrep -f 'diskimages-help' || true
+              )"
+              helper_pids="$(printf '%s\n' "${helper_pids}" | awk 'NF' | sort -u)"
+              if [ -n "${helper_pids}" ]; then
+                while IFS= read -r pid; do
+                  [ -z "${pid}" ] && continue
+                  kill "${pid}" || true
+                done <<< "${helper_pids}"
+              fi
+            fi
             rm -f src-tauri/target/${{ matrix.target }}/release/bundle/macos/rw.*.dmg || true
             rm -f "${log_file}"
 
