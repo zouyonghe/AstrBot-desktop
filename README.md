@@ -6,8 +6,11 @@
 
 AstrBot 桌面应用（Tauri）。
 
-<a href="https://github.com/AstrBotDevs/AstrBot">上游项目仓库</a> ｜
-<a href="https://astrbot.app/">官方文档</a> ｜
+<p>
+  <a href="https://github.com/AstrBotDevs/AstrBot">上游项目仓库</a>
+  <span> · </span>
+  <a href="https://astrbot.app/">官方文档</a>
+</p>
 <br>
 
 <img src="https://img.shields.io/badge/Tauri-2.10.0-24C8D8?logo=tauri&logoColor=white" alt="Tauri 2.10.0">
