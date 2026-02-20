@@ -11,11 +11,6 @@ on:
         description: AstrBot source git ref (branch/tag/sha), empty means default ref
         required: false
         default: ""
-      publish_release:
-        description: Publish GitHub Release after successful builds
-        required: false
-        type: boolean
-        default: false
   schedule:
     - cron: '0 * * * *'
 
@@ -192,7 +187,7 @@ jobs:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
+    if: ${{ always() && needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: linux-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -243,7 +238,7 @@ jobs:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
+    if: ${{ always() && needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: macos-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -414,7 +409,7 @@ jobs:
     needs:
       - resolve_build_context
       - sync_repo_version
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
+    if: ${{ always() && needs.resolve_build_context.outputs.should_build == 'true' && (needs.sync_repo_version.result == 'success' || needs.sync_repo_version.result == 'skipped') }}
     name: windows-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     env:
@@ -460,7 +455,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true')) }}
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     needs:
       - resolve_build_context
       - build-linux
