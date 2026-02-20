@@ -1,5 +1,5 @@
-!macro NSIS_HOOK_PREUNINSTALL
-  ; Ensure packaged backend processes do not keep install files locked during uninstall.
+!macro NSIS_RUN_BACKEND_CLEANUP
+  ; Ensure packaged backend processes do not keep install files locked.
   StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
   IfFileExists "$0" +2 0
     StrCpy $0 "powershell.exe"
@@ -10,6 +10,15 @@
     nsExec::ExecToLog '"$0" -NoProfile -ExecutionPolicy Bypass -File "$1" -InstallDir "$INSTDIR"'
     Goto +2
   DetailPrint "Skip backend process cleanup: script not found: $1"
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  ; Stop old app/backend processes before overwriting files during upgrades.
+  !insertmacro NSIS_RUN_BACKEND_CLEANUP
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro NSIS_RUN_BACKEND_CLEANUP
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL

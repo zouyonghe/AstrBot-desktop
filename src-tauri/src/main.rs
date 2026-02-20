@@ -304,20 +304,27 @@ impl BackendState {
                     .clone()
                     .unwrap_or_else(|| backend_dir.to_path_buf())
             });
-        let webui_dir = env::var("ASTRBOT_WEBUI_DIR")
+        let embedded_webui_dir = env::var("ASTRBOT_WEBUI_DIR")
             .ok()
             .map(PathBuf::from)
             .or_else(|| {
                 resolve_resource_path(app, "webui/index.html")
                     .and_then(|index_path| index_path.parent().map(Path::to_path_buf))
             });
+        let webui_dir = resolve_packaged_webui_dir(embedded_webui_dir, root_dir.as_deref())?;
+
+        let args = vec![
+            launch_script_path.to_string_lossy().to_string(),
+            "--webui-dir".to_string(),
+            webui_dir.to_string_lossy().to_string(),
+        ];
 
         let plan = LaunchPlan {
             cmd: python_path.to_string_lossy().to_string(),
-            args: vec![launch_script_path.to_string_lossy().to_string()],
+            args,
             cwd,
             root_dir,
-            webui_dir,
+            webui_dir: Some(webui_dir),
             packaged_mode: true,
         };
         Ok(Some(plan))
@@ -1176,7 +1183,10 @@ fn main() {
         })
         .on_page_load(|webview, payload| match payload.event() {
             PageLoadEvent::Started => {
-                append_desktop_log(&format!("page-load started: {}", payload.url()))
+                append_desktop_log(&format!("page-load started: {}", payload.url()));
+                if should_inject_desktop_bridge(webview.app_handle(), payload.url()) {
+                    inject_desktop_bridge(webview);
+                }
             }
             PageLoadEvent::Finished => {
                 append_desktop_log(&format!("page-load finished: {}", payload.url()));
@@ -1622,6 +1632,14 @@ fn update_tray_menu_labels(app_handle: &AppHandle) {
 
 const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 (() => {
+  if (
+    window.astrbotDesktop &&
+    window.astrbotDesktop.__tauriBridge === true &&
+    typeof window.astrbotDesktop.onTrayRestartBackend === 'function'
+  ) {
+    return;
+  }
+
   const invoke = window.__TAURI_INTERNALS__?.invoke;
   if (typeof invoke !== 'function') return;
 
@@ -1998,7 +2016,7 @@ fn should_inject_desktop_bridge(app_handle: &AppHandle, page_url: &Url) -> bool 
     let Ok(backend_url) = Url::parse(&state.backend_url) else {
         return false;
     };
-    same_origin(&backend_url, page_url)
+    tray_origin_decision(&backend_url, page_url).uses_backend_origin
 }
 
 fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
@@ -2158,6 +2176,109 @@ fn detect_astrbot_source_root() -> Option<PathBuf> {
 
 fn default_packaged_root_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".astrbot"))
+}
+
+fn packaged_fallback_webui_probe_dir(root_dir: Option<&Path>) -> Option<PathBuf> {
+    match root_dir {
+        Some(root) => Some(root.join("data").join("dist")),
+        None => default_packaged_root_dir().map(|root| root.join("data").join("dist")),
+    }
+}
+
+fn packaged_fallback_webui_dir(root_dir: Option<&Path>) -> Option<PathBuf> {
+    let candidate = packaged_fallback_webui_probe_dir(root_dir)?;
+    if candidate.join("index.html").is_file() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn packaged_fallback_webui_index_display(root_dir: Option<&Path>) -> String {
+    packaged_fallback_webui_probe_dir(root_dir)
+        .map(|path| path.join("index.html").display().to_string())
+        .unwrap_or_else(|| "<unresolved>".to_string())
+}
+
+fn packaged_webui_unavailable_error(locale: &str, embedded_index: Option<&Path>) -> String {
+    if locale == "en-US" {
+        if let Some(index) = embedded_index {
+            return format!(
+                "Packaged WebUI is unavailable. Missing embedded index at {} and fallback data/dist. Please reinstall AstrBot or download the matching dist.zip to data/dist.",
+                index.display()
+            );
+        }
+        return "Packaged WebUI directory is missing and fallback data/dist is unavailable. Please reinstall AstrBot or download the matching dist.zip to data/dist."
+            .to_string();
+    }
+
+    if let Some(index) = embedded_index {
+        return format!(
+            "内置 WebUI 不可用。缺少内置入口文件：{}，且回退目录 data/dist 也不可用。请重装 AstrBot，或下载匹配版本的 dist.zip 到 data/dist。",
+            index.display()
+        );
+    }
+
+    "内置 WebUI 目录缺失，且回退目录 data/dist 也不可用。请重装 AstrBot，或下载匹配版本的 dist.zip 到 data/dist。".to_string()
+}
+
+fn resolve_packaged_webui_dir(
+    embedded_webui_dir: Option<PathBuf>,
+    root_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let locale = resolve_shell_locale();
+    let fallback_webui_dir = packaged_fallback_webui_dir(root_dir);
+
+    match embedded_webui_dir {
+        Some(candidate) => {
+            let embedded_index = candidate.join("index.html");
+            if embedded_index.is_file() {
+                return Ok(candidate);
+            }
+
+            append_desktop_log(&format!(
+                "packaged webui index is missing at {}, trying fallback data/dist",
+                embedded_index.display()
+            ));
+
+            if let Some(fallback) = fallback_webui_dir {
+                append_desktop_log(&format!(
+                    "using fallback webui directory: {}",
+                    fallback.display()
+                ));
+                return Ok(fallback);
+            }
+
+            let fallback_index = packaged_fallback_webui_index_display(root_dir);
+            append_desktop_log(&format!(
+                "packaged webui resolution failed: embedded index missing at {}, fallback index missing at {}",
+                embedded_index.display(),
+                fallback_index
+            ));
+
+            Err(packaged_webui_unavailable_error(
+                locale,
+                Some(&embedded_index),
+            ))
+        }
+        None => {
+            if let Some(fallback) = fallback_webui_dir {
+                append_desktop_log(&format!(
+                    "embedded webui directory not found, using fallback webui directory: {}",
+                    fallback.display()
+                ));
+                return Ok(fallback);
+            }
+
+            let fallback_index = packaged_fallback_webui_index_display(root_dir);
+            append_desktop_log(&format!(
+                "packaged webui resolution failed: embedded webui directory is missing, fallback index missing at {}",
+                fallback_index
+            ));
+
+            Err(packaged_webui_unavailable_error(locale, None))
+        }
+    }
 }
 
 fn resolve_backend_timeout_ms(packaged_mode: bool) -> Option<Duration> {
