@@ -33,7 +33,7 @@ help:
 	@echo "  make prepare-resources  Prepare all resources"
 	@echo "  make dev                Run Tauri dev"
 	@echo "  make build              Run Tauri build"
-	@echo "                          (set ASTRBOT_BUILD_SOURCE_DIR=... to force local source)"
+	@echo "                          (set ASTRBOT_SOURCE_DIR=... or ASTRBOT_BUILD_SOURCE_DIR=...)"
 	@echo "  make rebuild            Clean and build"
 	@echo "  make lint               Run formatting and clippy checks"
 	@echo "  make test               Run Rust tests"
@@ -81,11 +81,14 @@ build:
 	@set -e; \
 	build_version="$(ASTRBOT_DESKTOP_VERSION)"; \
 	build_source_dir="$(ASTRBOT_BUILD_SOURCE_DIR)"; \
+	if [ -z "$$build_source_dir" ]; then \
+		build_source_dir="$(ASTRBOT_SOURCE_DIR)"; \
+	fi; \
 	if [ -z "$$build_version" ]; then \
 		build_version="$$(node -e "console.log(require('./package.json').version)")"; \
 	fi; \
 	if [ -n "$$build_source_dir" ]; then \
-		echo "Using explicit build source dir: $$build_source_dir"; \
+		echo "Using build source dir: $$build_source_dir"; \
 	fi; \
 	echo "Build resource source dir: $${build_source_dir:-<auto vendor from git ref>}"; \
 	ASTRBOT_SOURCE_GIT_URL="$(ASTRBOT_SOURCE_GIT_URL)" \
