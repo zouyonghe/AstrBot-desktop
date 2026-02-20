@@ -209,6 +209,30 @@ const patchMonacoCssNestingWarnings = async (dashboardDir) => {
   }
 };
 
+const patchTrayRestartBridgeGuard = async (dashboardDir) => {
+  const appVuePath = path.join(dashboardDir, 'src', 'App.vue');
+  if (!existsSync(appVuePath)) {
+    return;
+  }
+
+  const source = await readFile(appVuePath, 'utf8');
+  const legacyGuard = 'if (!desktopBridge?.isElectron || !desktopBridge.onTrayRestartBackend) {';
+  if (!source.includes(legacyGuard)) {
+    return;
+  }
+
+  const patched = source.replace(
+    legacyGuard,
+    'if (!desktopBridge?.onTrayRestartBackend) {',
+  );
+  if (patched !== source) {
+    await writeFile(appVuePath, patched, 'utf8');
+    console.log(
+      '[prepare-resources] Patched dashboard tray restart bridge guard to support Tauri runtime.',
+    );
+  }
+};
+
 const readAstrbotVersionFromPyproject = async (sourceDir) => {
   const pyprojectPath = path.join(sourceDir, 'pyproject.toml');
   if (!existsSync(pyprojectPath)) {
@@ -386,6 +410,7 @@ const prepareWebui = async (sourceDir) => {
   const dashboardDir = path.join(sourceDir, 'dashboard');
   ensurePackageInstall(dashboardDir, 'AstrBot dashboard');
   await patchMonacoCssNestingWarnings(dashboardDir);
+  await patchTrayRestartBridgeGuard(dashboardDir);
   runPnpmChecked(['--dir', dashboardDir, 'build'], sourceDir);
 
   const sourceWebuiDir = path.join(sourceDir, 'dashboard', 'dist');
