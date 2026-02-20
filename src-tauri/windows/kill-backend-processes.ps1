@@ -10,15 +10,16 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 }
 
 try {
-    $installRoot = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([char]92).ToLowerInvariant()
+    $installRootRaw = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([char]92)
 } catch {
     exit 0
 }
 
-if ([string]::IsNullOrWhiteSpace($installRoot)) {
+if ([string]::IsNullOrWhiteSpace($installRootRaw)) {
     exit 0
 }
 
+$installRoot = $installRootRaw.ToLowerInvariant()
 $installRootWithSep = $installRoot + [string][char]92
 $currentPid = $PID
 $targetProcessNames = @(

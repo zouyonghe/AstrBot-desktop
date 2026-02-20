@@ -2194,10 +2194,34 @@ fn packaged_fallback_webui_dir(root_dir: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+fn packaged_webui_missing_embedded_error(locale: &str, embedded_index: &Path) -> String {
+    if locale == "en-US" {
+        return format!(
+            "Packaged WebUI is unavailable. Missing embedded index at {} and fallback data/dist. Please reinstall AstrBot or download the matching dist.zip to data/dist.",
+            embedded_index.display()
+        );
+    }
+
+    format!(
+        "内置 WebUI 不可用。缺少内置入口文件：{}，且回退目录 data/dist 也不可用。请重装 AstrBot，或下载匹配版本的 dist.zip 到 data/dist。",
+        embedded_index.display()
+    )
+}
+
+fn packaged_webui_missing_embedded_dir_error(locale: &str) -> String {
+    if locale == "en-US" {
+        return "Packaged WebUI directory is missing and fallback data/dist is unavailable. Please reinstall AstrBot or download the matching dist.zip to data/dist."
+            .to_string();
+    }
+
+    "内置 WebUI 目录缺失，且回退目录 data/dist 也不可用。请重装 AstrBot，或下载匹配版本的 dist.zip 到 data/dist。".to_string()
+}
+
 fn resolve_packaged_webui_dir(
     embedded_webui_dir: Option<PathBuf>,
     root_dir: Option<&Path>,
 ) -> Result<PathBuf, String> {
+    let locale = resolve_shell_locale();
     let fallback_webui_dir = packaged_fallback_webui_dir(root_dir);
     let fallback_index_path = packaged_fallback_webui_probe_dir(root_dir)
         .map(|path| path.join("index.html").display().to_string());
@@ -2229,9 +2253,9 @@ fn resolve_packaged_webui_dir(
                 fallback_index
             ));
 
-            Err(format!(
-                "Packaged WebUI is unavailable. Missing embedded index at {} and fallback data/dist. Please reinstall AstrBot or download the matching dist.zip to data/dist.",
-                embedded_index.display()
+            Err(packaged_webui_missing_embedded_error(
+                locale,
+                &embedded_index,
             ))
         }
         None => {
@@ -2249,10 +2273,7 @@ fn resolve_packaged_webui_dir(
                 fallback_index
             ));
 
-            Err(
-                "Packaged WebUI directory is missing and fallback data/dist is unavailable. Please reinstall AstrBot or download the matching dist.zip to data/dist."
-                    .to_string(),
-            )
+            Err(packaged_webui_missing_embedded_dir_error(locale))
         }
     }
 }
