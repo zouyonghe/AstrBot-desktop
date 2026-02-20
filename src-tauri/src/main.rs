@@ -1179,7 +1179,7 @@ fn main() {
                 append_desktop_log(&format!("page-load finished: {}", payload.url()));
                 if should_inject_desktop_bridge(webview.app_handle(), payload.url()) {
                     inject_desktop_bridge(webview);
-                } else if !matches!(payload.url().scheme(), "http" | "https") {
+                } else if should_apply_startup_loading_mode(payload.url()) {
                     apply_startup_loading_mode(webview);
                 }
             }
@@ -2004,6 +2004,15 @@ fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
     }
 }
 
+fn should_apply_startup_loading_mode(page_url: &Url) -> bool {
+    if matches!(page_url.scheme(), "http" | "https") {
+        return false;
+    }
+
+    let path = page_url.path();
+    path == "/" || path.ends_with("/index.html")
+}
+
 fn apply_startup_loading_mode(webview: &tauri::Webview<tauri::Wry>) {
     let app_handle = webview.app_handle();
     let mode = resolve_startup_loading_mode(app_handle);
@@ -2031,19 +2040,25 @@ fn resolve_startup_loading_mode(app_handle: &AppHandle) -> &'static str {
 
     let state = app_handle.state::<BackendState>();
     match state.resolve_launch_plan(app_handle) {
-        Ok(plan) => {
-            let requires_panel_update = plan
-                .webui_dir
-                .as_ref()
-                .map(|dir| !dir.join("index.html").is_file())
-                .unwrap_or(true);
-            if requires_panel_update {
-                append_desktop_log("startup mode set to panel-update: webui index is unavailable");
-                STARTUP_MODE_PANEL_UPDATE
-            } else {
-                STARTUP_MODE_LOADING
+        Ok(plan) => match plan.webui_dir {
+            Some(webui_dir) => {
+                if !webui_dir.join("index.html").is_file() {
+                    append_desktop_log(&format!(
+                        "startup mode set to panel-update: webui index is unavailable at {}",
+                        webui_dir.display()
+                    ));
+                    STARTUP_MODE_PANEL_UPDATE
+                } else {
+                    STARTUP_MODE_LOADING
+                }
             }
-        }
+            None => {
+                append_desktop_log(
+                    "startup mode set to panel-update: launch plan does not provide webui_dir",
+                );
+                STARTUP_MODE_PANEL_UPDATE
+            }
+        },
         Err(error) => {
             append_desktop_log(&format!(
                 "failed to resolve startup mode from launch plan, fallback to loading: {error}"

@@ -151,44 +151,55 @@
         const status = document.getElementById("startup-status");
         if (!title || !desc || !status) return;
 
-        const locale = typeof navigator?.language === "string" ? navigator.language : "zh-CN";
-        const isEnglish = locale.toLowerCase().startsWith("en");
-        const i18n = {
-          loading: isEnglish
-            ? {
-                title: "AstrBot Loading",
-                desc: "Initializing runtime, please wait.",
-                status: "Starting AstrBot...",
-              }
-            : {
-                title: "AstrBot 正在加载",
-                desc: "正在初始化运行环境，请稍候。",
-                status: "正在启动 AstrBot...",
-              },
-          "panel-update": isEnglish
-            ? {
-                title: "AstrBot Updating Panel",
-                desc: "Panel updates detected. Downloading and applying now, please keep the app open.",
-                status: "Downloading AstrBot panel updates...",
-              }
-            : {
-                title: "AstrBot 正在更新面板",
-                desc: "检测到面板更新，正在下载并应用，请耐心等待，不要关闭应用。",
-                status: "正在下载 AstrBot 面板更新...",
-              },
+        const STARTUP_COPY = {
+          en: {
+            loading: {
+              title: "AstrBot Loading",
+              desc: "Initializing runtime, please wait.",
+              status: "Starting AstrBot...",
+            },
+            "panel-update": {
+              title: "AstrBot Updating Panel",
+              desc: "Panel updates detected. Downloading and applying now, please keep the app open.",
+              status: "Downloading AstrBot panel updates...",
+            },
+          },
+          zh: {
+            loading: {
+              title: "AstrBot 正在加载",
+              desc: "正在初始化运行环境，请稍候。",
+              status: "正在启动 AstrBot...",
+            },
+            "panel-update": {
+              title: "AstrBot 正在更新面板",
+              desc: "检测到面板更新，正在下载并应用，请耐心等待，不要关闭应用。",
+              status: "正在下载 AstrBot 面板更新...",
+            },
+          },
         };
 
-        const applyMode = (mode) => {
-          const next = i18n[mode] || i18n.loading;
+        const resolveLocaleKey = () => {
+          const locale = typeof navigator?.language === "string" ? navigator.language : "zh-CN";
+          return locale.toLowerCase().startsWith("en") ? "en" : "zh";
+        };
+
+        const localeKey = resolveLocaleKey();
+        const resolveStartupCopy = (mode) => {
+          const languageCopy = STARTUP_COPY[localeKey] || STARTUP_COPY.zh;
+          return languageCopy[mode] || languageCopy.loading;
+        };
+
+        const applyStartupMode = (mode) => {
+          const next = resolveStartupCopy(mode);
           title.textContent = next.title;
           desc.textContent = next.desc;
           status.textContent = next.status;
         };
 
         window.__astrbotSetStartupMode = (mode) => {
-          applyMode(typeof mode === "string" ? mode : "loading");
+          applyStartupMode(typeof mode === "string" ? mode : "loading");
         };
-        applyMode("loading");
+        applyStartupMode("loading");
       })();
     </script>
   </body>
