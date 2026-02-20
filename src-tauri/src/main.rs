@@ -53,6 +53,7 @@ const TRAY_MENU_RELOAD_WINDOW: &str = "tray_reload_window";
 const TRAY_MENU_RESTART_BACKEND: &str = "tray_restart_backend";
 const TRAY_MENU_QUIT: &str = "tray_quit";
 const TRAY_RESTART_BACKEND_EVENT: &str = "astrbot://tray-restart-backend";
+const DESKTOP_BRIDGE_TRAY_EVENT_PLACEHOLDER: &str = "__ASTRBOT_TRAY_RESTART_BACKEND_EVENT__";
 const DEFAULT_SHELL_LOCALE: &str = "zh-CN";
 const STARTUP_MODE_ENV: &str = "ASTRBOT_DESKTOP_STARTUP_MODE";
 // Keep in sync with STARTUP_MODES in ui/index.html.
@@ -1624,7 +1625,7 @@ fn update_tray_menu_labels(app_handle: &AppHandle) {
     set_menu_text_safe(&tray_state.quit_item, shell_texts.tray_quit, TRAY_MENU_QUIT);
 }
 
-const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
+const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE: &str = r#"
 (() => {
   if (
     window.astrbotDesktop &&
@@ -1645,9 +1646,7 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
     STOP_BACKEND: 'desktop_bridge_stop_backend',
   });
-  const BRIDGE_EVENTS = Object.freeze({
-    TRAY_RESTART_BACKEND: 'astrbot://tray-restart-backend',
-  });
+  const TRAY_RESTART_BACKEND_EVENT = '__ASTRBOT_TRAY_RESTART_BACKEND_EVENT__';
 
   const invokeBridge = async (command, payload = {}) => {
     try {
@@ -1659,7 +1658,14 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 
   const trayRestartState =
     window.__astrbotDesktopTrayRestartState ||
-    (window.__astrbotDesktopTrayRestartState = { handlers: new Set(), pending: 0 });
+    (window.__astrbotDesktopTrayRestartState = {
+      handlers: new Set(),
+      pending: 0,
+      unlistenTrayRestartBackendEvent: null
+    });
+  if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'undefined') {
+    trayRestartState.unlistenTrayRestartBackendEvent = null;
+  }
 
   const emitTrayRestart = () => {
     if (trayRestartState.handlers.size === 0) {
@@ -1687,11 +1693,17 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
   const listenToTrayRestartBackendEvent = async () => {
     const listen = tauriEvent?.listen;
     if (typeof listen !== 'function') return;
+    if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'function') return;
     try {
-      await listen(BRIDGE_EVENTS.TRAY_RESTART_BACKEND, () => {
+      const unlisten = await listen(TRAY_RESTART_BACKEND_EVENT, () => {
         emitTrayRestart();
       });
-    } catch {}
+      if (typeof unlisten === 'function') {
+        trayRestartState.unlistenTrayRestartBackendEvent = unlisten;
+      }
+    } catch (error) {
+      console.warn('Failed to listen for tray restart backend event', error);
+    }
   };
 
   const getStoredAuthToken = () => {
@@ -1967,6 +1979,19 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
 })();
 "#;
 
+static DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: OnceLock<String> = OnceLock::new();
+
+fn desktop_bridge_bootstrap_script() -> &'static str {
+    DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT
+        .get_or_init(|| {
+            DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT_TEMPLATE.replace(
+                DESKTOP_BRIDGE_TRAY_EVENT_PLACEHOLDER,
+                TRAY_RESTART_BACKEND_EVENT,
+            )
+        })
+        .as_str()
+}
+
 fn same_origin(left: &Url, right: &Url) -> bool {
     left.scheme() == right.scheme()
         && left.host_str() == right.host_str()
@@ -2018,7 +2043,7 @@ fn should_inject_desktop_bridge(app_handle: &AppHandle, page_url: &Url) -> bool 
 }
 
 fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
-    if let Err(error) = webview.eval(DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT) {
+    if let Err(error) = webview.eval(desktop_bridge_bootstrap_script()) {
         append_desktop_log(&format!("failed to inject desktop bridge script: {error}"));
     }
 }
