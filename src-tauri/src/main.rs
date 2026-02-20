@@ -9,7 +9,7 @@ use std::{
     ffi::OsString,
     fs::{self, OpenOptions},
     io::{Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::{IpAddr, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -892,13 +892,29 @@ Content-Length: {}\r\n\
 
         let _restart_guard = AtomicFlagGuard::set(&self.is_restarting);
         let plan = self.resolve_launch_plan(app)?;
+        let has_managed_child = self
+            .child
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or_else(|error| {
+                append_desktop_log(&format!(
+                    "backend child lock poisoned while resolving restart strategy: {error}"
+                ));
+                false
+            });
         let normalized_param = Self::sanitize_auth_token(auth_token);
         if let Some(token) = normalized_param.as_deref() {
             self.set_restart_auth_token(Some(token));
         }
         let restart_auth_token = normalized_param.or_else(|| self.get_restart_auth_token());
         let previous_start_time = self.fetch_backend_start_time();
-        if self.request_graceful_restart(restart_auth_token.as_deref()) {
+        let should_skip_graceful_restart =
+            cfg!(target_os = "windows") && plan.packaged_mode && has_managed_child;
+        if should_skip_graceful_restart {
+            append_desktop_log(
+                "skip graceful restart for packaged windows managed backend; using managed restart",
+            );
+        } else if self.request_graceful_restart(restart_auth_token.as_deref()) {
             match self.wait_for_graceful_restart(previous_start_time, plan.packaged_mode) {
                 Ok(()) => {
                     append_desktop_log("graceful restart completed via backend api");
@@ -908,9 +924,14 @@ Content-Length: {}\r\n\
                     "graceful restart did not complete, fallback to managed restart: {error}"
                 )),
             }
-        } else {
+        } else if has_managed_child {
             append_desktop_log(
                 "graceful restart request was rejected, fallback to managed restart",
+            );
+        } else {
+            return Err(
+                "graceful restart request was rejected and backend is not desktop-managed."
+                    .to_string(),
             );
         }
 
@@ -1293,7 +1314,14 @@ fn main_window_uses_backend_origin(app_handle: &AppHandle) -> bool {
     let Ok(backend_url) = Url::parse(&state.backend_url) else {
         return false;
     };
-    same_origin(&backend_url, &window_url)
+    let uses_backend_origin = same_backend_origin_for_tray(&backend_url, &window_url);
+    if !uses_backend_origin {
+        append_desktop_log(&format!(
+            "tray restart fallback to desktop-managed flow due origin mismatch: backend={} window={}",
+            backend_url, window_url
+        ));
+    }
+    uses_backend_origin
 }
 
 fn emit_tray_restart_backend_event(app_handle: &AppHandle) {
@@ -1846,6 +1874,30 @@ fn same_origin(left: &Url, right: &Url) -> bool {
     left.scheme() == right.scheme()
         && left.host_str() == right.host_str()
         && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_loopback_host(host: Option<&str>) -> bool {
+    match host {
+        Some("localhost") => true,
+        Some(raw) => raw.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()),
+        None => false,
+    }
+}
+
+fn same_backend_origin_for_tray(backend_url: &Url, window_url: &Url) -> bool {
+    if same_origin(backend_url, window_url) {
+        return true;
+    }
+
+    let backend_scheme = backend_url.scheme();
+    let window_scheme = window_url.scheme();
+    if !matches!(backend_scheme, "http" | "https") || !matches!(window_scheme, "http" | "https") {
+        return false;
+    }
+
+    backend_url.port_or_known_default() == window_url.port_or_known_default()
+        && is_loopback_host(backend_url.host_str())
+        && is_loopback_host(window_url.host_str())
 }
 
 fn should_inject_desktop_bridge(app_handle: &AppHandle, page_url: &Url) -> bool {
