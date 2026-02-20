@@ -48,6 +48,9 @@ const TRAY_MENU_RELOAD_WINDOW: &str = "tray_reload_window";
 const TRAY_MENU_RESTART_BACKEND: &str = "tray_restart_backend";
 const TRAY_MENU_QUIT: &str = "tray_quit";
 const DEFAULT_SHELL_LOCALE: &str = "zh-CN";
+const STARTUP_MODE_ENV: &str = "ASTRBOT_DESKTOP_STARTUP_MODE";
+const STARTUP_MODE_LOADING: &str = "loading";
+const STARTUP_MODE_PANEL_UPDATE: &str = "panel-update";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(target_os = "windows")]
@@ -1176,6 +1179,8 @@ fn main() {
                 append_desktop_log(&format!("page-load finished: {}", payload.url()));
                 if should_inject_desktop_bridge(webview.app_handle(), payload.url()) {
                     inject_desktop_bridge(webview);
+                } else if !matches!(payload.url().scheme(), "http" | "https") {
+                    apply_startup_loading_mode(webview);
                 }
             }
         })
@@ -1996,6 +2001,55 @@ fn should_inject_desktop_bridge(app_handle: &AppHandle, page_url: &Url) -> bool 
 fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
     if let Err(error) = webview.eval(DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT) {
         append_desktop_log(&format!("failed to inject desktop bridge script: {error}"));
+    }
+}
+
+fn apply_startup_loading_mode(webview: &tauri::Webview<tauri::Wry>) {
+    let app_handle = webview.app_handle();
+    let mode = resolve_startup_loading_mode(app_handle);
+    let mode_js = serde_json::to_string(mode).unwrap_or_else(|_| "\"loading\"".to_string());
+    let script = format!("window.__astrbotSetStartupMode?.({mode_js});");
+    if let Err(error) = webview.eval(&script) {
+        append_desktop_log(&format!("failed to apply startup loading mode: {error}"));
+    }
+}
+
+fn resolve_startup_loading_mode(app_handle: &AppHandle) -> &'static str {
+    if let Ok(raw_mode) = env::var(STARTUP_MODE_ENV) {
+        let normalized = raw_mode.trim();
+        if normalized.eq_ignore_ascii_case(STARTUP_MODE_PANEL_UPDATE) {
+            append_desktop_log("startup mode forced to panel-update by env");
+            return STARTUP_MODE_PANEL_UPDATE;
+        }
+        if !normalized.is_empty() && !normalized.eq_ignore_ascii_case(STARTUP_MODE_LOADING) {
+            append_desktop_log(&format!(
+                "invalid startup mode in {STARTUP_MODE_ENV}: {normalized}, fallback to loading"
+            ));
+        }
+        return STARTUP_MODE_LOADING;
+    }
+
+    let state = app_handle.state::<BackendState>();
+    match state.resolve_launch_plan(app_handle) {
+        Ok(plan) => {
+            let requires_panel_update = plan
+                .webui_dir
+                .as_ref()
+                .map(|dir| !dir.join("index.html").is_file())
+                .unwrap_or(true);
+            if requires_panel_update {
+                append_desktop_log("startup mode set to panel-update: webui index is unavailable");
+                STARTUP_MODE_PANEL_UPDATE
+            } else {
+                STARTUP_MODE_LOADING
+            }
+        }
+        Err(error) => {
+            append_desktop_log(&format!(
+                "failed to resolve startup mode from launch plan, fallback to loading: {error}"
+            ));
+            STARTUP_MODE_LOADING
+        }
     }
 }
 
