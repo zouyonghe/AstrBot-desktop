@@ -15,12 +15,11 @@ RUST_MANIFEST ?= src-tauri/Cargo.toml
 NODE_MODULES_DIR ?= node_modules
 PNPM_STORE_DIR ?= .pnpm-store
 TAURI_TARGET_DIR ?= src-tauri/target
-CLEAN_ENV ?= $(env)
 ASTRBOT_ENV_KEYS := ASTRBOT_SOURCE_DIR ASTRBOT_SOURCE_GIT_URL ASTRBOT_SOURCE_GIT_REF ASTRBOT_DESKTOP_VERSION ASTRBOT_BUILD_SOURCE_DIR
 
 .PHONY: help deps sync-version update prepare-webui prepare-backend prepare-resources dev build \
 	prepare rebuild lint test doctor prune size clean clean-rust clean-resources \
-	clean-vendor-local clean-vendor clean-node clean-all
+	clean-vendor-local clean-vendor clean-node clean-env clean-all
 
 help:
 	@echo "AstrBot Desktop Make Targets"
@@ -47,8 +46,8 @@ help:
 	@echo "  make clean-vendor-local Remove vendor/AstrBot-local"
 	@echo "  make clean-vendor       Remove vendor and runtime"
 	@echo "  make clean-node         Remove node_modules and pnpm store"
+	@echo "  make clean-env          Generate shell script to unset build env vars"
 	@echo "  make clean              Clean all build artifacts"
-	@echo "                          (use env=1 to generate env reset script)"
 	@echo "  make clean-all          Alias of clean"
 
 deps:
@@ -138,16 +137,17 @@ clean-vendor:
 clean-node:
 	rm -rf $(NODE_MODULES_DIR) $(PNPM_STORE_DIR)
 
+clean-env:
+	@set -e; \
+	reset_script="$(ASTRBOT_RESET_ENV_SCRIPT)"; \
+	{ \
+		echo "#!/usr/bin/env sh"; \
+		echo "unset $(ASTRBOT_ENV_KEYS)"; \
+	} > "$$reset_script"; \
+	chmod +x "$$reset_script"; \
+	echo "Generated $$reset_script"; \
+	echo "Run: source $$reset_script"
+
 clean: clean-rust clean-resources clean-vendor clean-node
-	@if [ "$(CLEAN_ENV)" = "1" ]; then \
-		reset_script="$(ASTRBOT_RESET_ENV_SCRIPT)"; \
-		{ \
-			echo "#!/usr/bin/env sh"; \
-			echo "unset $(ASTRBOT_ENV_KEYS)"; \
-		} > "$$reset_script"; \
-		chmod +x "$$reset_script"; \
-		echo "Generated $$reset_script"; \
-		echo "Run: source $$reset_script"; \
-	fi
 
 clean-all: clean
