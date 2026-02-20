@@ -2383,24 +2383,54 @@ fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
 fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("taskkill")
+        let gentle_status = Command::new("taskkill")
             .args(["/pid", &child.id().to_string(), "/t"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null())
             .status();
-        return wait_for_child_exit(child, timeout);
+        if !wait_for_child_exit(child, timeout) {
+            let force_status = Command::new("taskkill")
+                .args(["/pid", &child.id().to_string(), "/t", "/f"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
+                .status();
+            append_desktop_log(&format!(
+                "backend graceful stop timed out, force-kill issued: pid={}, gentle={:?}, force={:?}",
+                child.id(),
+                gentle_status,
+                force_status
+            ));
+            return wait_for_child_exit(child, Duration::from_millis(2200));
+        }
+        return true;
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = Command::new("kill")
+        let term_status = Command::new("kill")
             .args(["-TERM", &child.id().to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null())
             .status();
-        wait_for_child_exit(child, timeout)
+        if !wait_for_child_exit(child, timeout) {
+            let kill_status = Command::new("kill")
+                .args(["-KILL", &child.id().to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
+                .status();
+            append_desktop_log(&format!(
+                "backend graceful stop timed out, force-kill issued: pid={}, term={:?}, kill={:?}",
+                child.id(),
+                term_status,
+                kill_status
+            ));
+            return wait_for_child_exit(child, Duration::from_millis(1500));
+        }
+        true
     }
 }
 

@@ -286,12 +286,15 @@ jobs:
           detach_sleep_seconds=2
           rw_dmg_image_prefix='/src-tauri/target/'
           rw_dmg_image_suffix_regex='/bundle/macos/rw\..*\.dmg$'
+          # hdiutil temporary writable images often mount under /Volumes/dmg.*,
+          # but macOS/tauri naming can vary; keep this pattern configurable.
+          rw_dmg_mountpoint_regex="${ASTRBOT_DESKTOP_MACOS_RW_DMG_MOUNT_REGEX:-^/Volumes/(dmg\\.|rw\\.|dmg-|rw-)}"
           allow_global_helper_cleanup="${ASTRBOT_DESKTOP_MACOS_ALLOW_GLOBAL_HELPER_KILL:-0}"
           log_file=""
           workspace_root="${GITHUB_WORKSPACE:-$(pwd)}"
-          workspace_root_raw="${workspace_root%/}"
-          workspace_root="${workspace_root_raw}"
           workspace_root="${workspace_root%/}"
+          declare -a canonical_path_cache_keys=()
+          declare -a canonical_path_cache_values=()
 
           cleanup_log_file() {
             if [ -n "${log_file:-}" ]; then
@@ -318,8 +321,25 @@ jobs:
 
           canonicalize_path() {
             local raw_path="$1"
-            python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${raw_path}"
+            local idx
+            for idx in "${!canonical_path_cache_keys[@]}"; do
+              if [ "${canonical_path_cache_keys[$idx]}" = "${raw_path}" ]; then
+                printf '%s\n' "${canonical_path_cache_values[$idx]}"
+                return 0
+              fi
+            done
+
+            local resolved_path
+            if ! resolved_path="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${raw_path}" 2>/dev/null)"; then
+              resolved_path="${raw_path}"
+            fi
+            canonical_path_cache_keys+=("${raw_path}")
+            canonical_path_cache_values+=("${resolved_path}")
+            printf '%s\n' "${resolved_path}"
           }
+
+          workspace_root_canonical="$(canonicalize_path "${workspace_root}")"
+          workspace_root_canonical="${workspace_root_canonical%/}"
 
           is_workspace_rw_dmg_image() {
             local image="$1"
@@ -327,11 +347,13 @@ jobs:
             normalized_image="$(canonicalize_path "${image}")"
             local candidate
             for candidate in "${image}" "${normalized_image}"; do
+              candidate="${candidate%/}"
               if [[ "${candidate}" == "${workspace_root}${rw_dmg_image_prefix}"* ]] &&
                  [[ "${candidate}" =~ ${rw_dmg_image_suffix_regex} ]]; then
                 return 0
               fi
-              if [[ "${candidate}" == "${workspace_root_raw}${rw_dmg_image_prefix}"* ]] &&
+              if [[ -n "${workspace_root_canonical}" ]] &&
+                 [[ "${candidate}" == "${workspace_root_canonical}${rw_dmg_image_prefix}"* ]] &&
                  [[ "${candidate}" =~ ${rw_dmg_image_suffix_regex} ]]; then
                 return 0
               fi
@@ -386,7 +408,9 @@ jobs:
 
           cleanup_stale_dmg_state() {
             local dmg_mounts
-            dmg_mounts="$(mount | awk '$3 ~ /^\/Volumes\/dmg\./ { print $3 }' || true)"
+            dmg_mounts="$(mount | awk -v mount_regex="${rw_dmg_mountpoint_regex}" '
+              $1 ~ /^\/dev\/disk/ && $3 ~ mount_regex { print $3 }
+            ' || true)"
             if [ -n "${dmg_mounts}" ]; then
               while IFS= read -r mount_point; do
                 [ -z "${mount_point}" ] && continue
