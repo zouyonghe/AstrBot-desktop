@@ -2400,9 +2400,9 @@ fn log_command_status(label: &str, pid: u32, status: &io::Result<ExitStatus>) {
         Ok(exit_status) => append_desktop_log(&format!(
             "{label} returned non-zero: pid={pid}, status={exit_status:?}"
         )),
-        Err(error) => {
-            append_desktop_log(&format!("{label} failed to start: pid={pid}, error={error}"))
-        }
+        Err(error) => append_desktop_log(&format!(
+            "{label} failed to start: pid={pid}, error={error}"
+        )),
     }
 }
 
