@@ -133,18 +133,83 @@
     <main class="shell">
       <section class="panel">
         <img class="brand" src="./astrbot-logo.png" alt="AstrBot Logo" />
-        <h1 class="title">AstrBot 正在启动</h1>
-        <p class="desc">
-          首次启动中，正在下载面板与初始化运行环境，请耐心等待，不要关闭应用。
-        </p>
+        <h1 id="startup-title" class="title">AstrBot Loading</h1>
+        <p id="startup-desc" class="desc">Initializing runtime, please wait.</p>
         <div class="bar-wrap" aria-hidden="true">
           <div class="bar"></div>
         </div>
         <div class="status">
           <span class="dot" aria-hidden="true"></span>
-          <span>正在准备 AstrBot 面板...</span>
+          <span id="startup-status">Starting AstrBot...</span>
         </div>
       </section>
     </main>
+    <script>
+      (() => {
+        const title = document.getElementById("startup-title");
+        const desc = document.getElementById("startup-desc");
+        const status = document.getElementById("startup-status");
+        if (!title || !desc || !status) return;
+
+        // Keep in sync with STARTUP_MODE_* in src-tauri/src/main.rs.
+        const STARTUP_MODES = Object.freeze({
+          LOADING: "loading",
+          PANEL_UPDATE: "panel-update",
+        });
+
+        const STARTUP_COPY = {
+          en: {
+            [STARTUP_MODES.LOADING]: {
+              title: "AstrBot Loading",
+              desc: "Initializing runtime, please wait.",
+              status: "Starting AstrBot...",
+            },
+            [STARTUP_MODES.PANEL_UPDATE]: {
+              title: "AstrBot Updating Panel",
+              desc: "Panel updates detected. Downloading and applying now, please keep the app open.",
+              status: "Downloading AstrBot panel updates...",
+            },
+          },
+          zh: {
+            [STARTUP_MODES.LOADING]: {
+              title: "AstrBot 正在加载",
+              desc: "正在初始化运行环境，请稍候。",
+              status: "正在启动 AstrBot...",
+            },
+            [STARTUP_MODES.PANEL_UPDATE]: {
+              title: "AstrBot 正在更新面板",
+              desc: "检测到面板更新，正在下载并应用，请耐心等待，不要关闭应用。",
+              status: "正在下载 AstrBot 面板更新...",
+            },
+          },
+        };
+
+        const resolveLocaleKey = () => {
+          const locale =
+            typeof navigator !== "undefined" && typeof navigator.language === "string"
+              ? navigator.language
+              : "zh-CN";
+          return locale.toLowerCase().startsWith("en") ? "en" : "zh";
+        };
+
+        const localeKey = resolveLocaleKey();
+        const resolveStartupCopy = (mode) => {
+          const languageCopy = STARTUP_COPY[localeKey] || STARTUP_COPY.zh;
+          return languageCopy[mode] || languageCopy[STARTUP_MODES.LOADING];
+        };
+
+        const applyStartupMode = (mode) => {
+          const next = resolveStartupCopy(mode);
+          title.textContent = next.title;
+          desc.textContent = next.desc;
+          status.textContent = next.status;
+        };
+
+        window.__astrbotSetStartupMode = (mode) => {
+          applyStartupMode(typeof mode === "string" ? mode : STARTUP_MODES.LOADING);
+        };
+        applyStartupMode(STARTUP_MODES.LOADING);
+      })();
+    </script>
   </body>
 </html>

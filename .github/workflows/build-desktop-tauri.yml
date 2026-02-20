@@ -180,9 +180,11 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: macos-latest
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
           - arch: arm64
             runner: macos-latest
+            target: aarch64-apple-darwin
 
     steps:
       - name: Checkout
@@ -198,7 +200,7 @@ jobs:
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: pnpm run build
+        run: pnpm run build -- --target ${{ matrix.target }}
 
       - name: Verify macOS DMG integrity
         shell: bash
