@@ -25,3 +25,6 @@ yarn-error.log*
 # python cache
 __pycache__/
 *.py[cod]
+
+# local helper scripts
+.astrbot-reset-env.sh

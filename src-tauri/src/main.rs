@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
     thread,
@@ -24,7 +24,7 @@ use tauri::{
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
-    AppHandle, Manager, RunEvent, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WindowEvent,
 };
 use url::Url;
 
@@ -52,6 +52,7 @@ const TRAY_MENU_TOGGLE_WINDOW: &str = "tray_toggle_window";
 const TRAY_MENU_RELOAD_WINDOW: &str = "tray_reload_window";
 const TRAY_MENU_RESTART_BACKEND: &str = "tray_restart_backend";
 const TRAY_MENU_QUIT: &str = "tray_quit";
+const TRAY_RESTART_BACKEND_EVENT: &str = "astrbot://tray-restart-backend";
 const DEFAULT_SHELL_LOCALE: &str = "zh-CN";
 const STARTUP_MODE_ENV: &str = "ASTRBOT_DESKTOP_STARTUP_MODE";
 // Keep in sync with STARTUP_MODES in ui/index.html.
@@ -64,6 +65,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 static BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static BRIDGE_BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -1393,6 +1395,7 @@ fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
         TRAY_MENU_RESTART_BACKEND => {
             append_desktop_log("tray requested backend restart");
             show_main_window(app_handle);
+            emit_tray_restart_backend_event(app_handle);
 
             let app_handle_cloned = app_handle.clone();
             thread::spawn(move || match do_restart_backend(&app_handle_cloned, None) {
@@ -1411,6 +1414,20 @@ fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
             app_handle.exit(0);
         }
         _ => {}
+    }
+}
+
+fn emit_tray_restart_backend_event(app_handle: &AppHandle) {
+    let Some(window) = app_handle.get_webview_window("main") else {
+        append_desktop_log("tray restart event skipped: main window not found");
+        return;
+    };
+    let token = TRAY_RESTART_SIGNAL_TOKEN.fetch_add(1, Ordering::Relaxed) + 1;
+
+    if let Err(error) = window.emit(TRAY_RESTART_BACKEND_EVENT, token) {
+        append_desktop_log(&format!(
+            "failed to emit tray restart backend event: {error}"
+        ));
     }
 }
 
@@ -1609,17 +1626,21 @@ fn update_tray_menu_labels(app_handle: &AppHandle) {
     set_menu_text_safe(&tray_state.quit_item, shell_texts.tray_quit, TRAY_MENU_QUIT);
 }
 
-const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
+const DESKTOP_BRIDGE_BOOTSTRAP_TEMPLATE: &str = r#"
 (() => {
+  const existingTrayRestartState = window.__astrbotDesktopTrayRestartState;
   if (
     window.astrbotDesktop &&
     window.astrbotDesktop.__tauriBridge === true &&
-    typeof window.astrbotDesktop.onTrayRestartBackend === 'function'
+    typeof window.astrbotDesktop.onTrayRestartBackend === 'function' &&
+    typeof existingTrayRestartState?.unlistenTrayRestartBackendEvent === 'function'
   ) {
     return;
   }
 
   const invoke = window.__TAURI_INTERNALS__?.invoke;
+  const transformCallback = window.__TAURI_INTERNALS__?.transformCallback;
+  const tauriEvent = window.__TAURI_INTERNALS__?.event ?? window.__TAURI__?.event;
   if (typeof invoke !== 'function') return;
 
   const BRIDGE_COMMANDS = Object.freeze({
@@ -1629,6 +1650,7 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
     STOP_BACKEND: 'desktop_bridge_stop_backend',
   });
+  const TRAY_RESTART_BACKEND_EVENT = '{TRAY_RESTART_BACKEND_EVENT}';
 
   const invokeBridge = async (command, payload = {}) => {
     try {
@@ -1638,11 +1660,77 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     }
   };
 
+  const createLegacyEventListener = async (eventName, handler) => {
+    if (typeof transformCallback !== 'function') {
+      throw new Error(
+        'No supported Tauri event listener API: expected tauriEvent.listen or __TAURI_INTERNALS__.invoke + transformCallback'
+      );
+    }
+
+    let eventId;
+    try {
+      eventId = await invoke('plugin:event|listen', {
+        event: eventName,
+        target: { kind: 'Any' },
+        handler: transformCallback(handler),
+      });
+    } catch (error) {
+      throw new Error(`plugin:event|listen failed: ${String(error)}`);
+    }
+
+    return async () => {
+      try {
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__?.unregisterListener?.(eventName, eventId);
+      } catch {}
+      try {
+        await invoke('plugin:event|unlisten', {
+          event: eventName,
+          eventId,
+        });
+      } catch {}
+    };
+  };
+
+  const createEventListener = async (eventName, handler) => {
+    if (typeof tauriEvent?.listen === 'function') {
+      return tauriEvent.listen(eventName, handler);
+    }
+    return createLegacyEventListener(eventName, handler);
+  };
+
   const trayRestartState =
     window.__astrbotDesktopTrayRestartState ||
-    (window.__astrbotDesktopTrayRestartState = { handlers: new Set(), pending: 0 });
+    (window.__astrbotDesktopTrayRestartState = {
+      handlers: new Set(),
+      pending: 0,
+      lastToken: 0,
+      unlistenTrayRestartBackendEvent: null
+    });
+  if (
+    typeof trayRestartState.lastToken !== 'number' ||
+    !Number.isFinite(trayRestartState.lastToken)
+  ) {
+    trayRestartState.lastToken = 0;
+  }
+  if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'undefined') {
+    trayRestartState.unlistenTrayRestartBackendEvent = null;
+  }
 
-  const emitTrayRestart = () => {
+  const shouldEmitForToken = (token) => {
+    const numericToken = Number(token);
+    if (Number.isFinite(numericToken) && numericToken > 0) {
+      if (numericToken <= trayRestartState.lastToken) return false;
+      trayRestartState.lastToken = numericToken;
+      return true;
+    } else {
+      trayRestartState.lastToken += 1;
+      return true;
+    }
+  };
+
+  const emitTrayRestart = (token = null) => {
+    if (!shouldEmitForToken(token)) return;
+
     if (trayRestartState.handlers.size === 0) {
       trayRestartState.pending = Number(trayRestartState.pending || 0) + 1;
       return;
@@ -1654,8 +1742,6 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     }
   };
 
-  window.__astrbotDesktopEmitTrayRestart = emitTrayRestart;
-
   const onTrayRestartBackend = (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = () => callback();
@@ -1664,7 +1750,23 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
       trayRestartState.pending -= 1;
       handler();
     }
-    return () => trayRestartState.handlers.delete(handler);
+    return () => {
+      trayRestartState.handlers.delete(handler);
+    };
+  };
+
+  const listenToTrayRestartBackendEvent = async () => {
+    if (typeof trayRestartState.unlistenTrayRestartBackendEvent === 'function') return;
+    try {
+      const unlisten = await createEventListener(TRAY_RESTART_BACKEND_EVENT, (event) => {
+        emitTrayRestart(event?.payload);
+      });
+      if (typeof unlisten === 'function') {
+        trayRestartState.unlistenTrayRestartBackendEvent = unlisten;
+      }
+    } catch (error) {
+      console.warn('Failed to listen for tray restart backend event', error);
+    }
   };
 
   const getStoredAuthToken = () => {
@@ -1934,10 +2036,22 @@ const DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: &str = r#"
     onTrayRestartBackend,
   };
 
+  void listenToTrayRestartBackendEvent();
   patchLocalStorageTokenSync();
   void syncAuthToken();
 })();
 "#;
+
+static DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT: OnceLock<String> = OnceLock::new();
+
+fn desktop_bridge_bootstrap_script() -> &'static str {
+    DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT
+        .get_or_init(|| {
+            DESKTOP_BRIDGE_BOOTSTRAP_TEMPLATE
+                .replace("{TRAY_RESTART_BACKEND_EVENT}", TRAY_RESTART_BACKEND_EVENT)
+        })
+        .as_str()
+}
 
 fn same_origin(left: &Url, right: &Url) -> bool {
     left.scheme() == right.scheme()
@@ -1990,7 +2104,7 @@ fn should_inject_desktop_bridge(app_handle: &AppHandle, page_url: &Url) -> bool 
 }
 
 fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
-    if let Err(error) = webview.eval(DESKTOP_BRIDGE_BOOTSTRAP_SCRIPT) {
+    if let Err(error) = webview.eval(desktop_bridge_bootstrap_script()) {
         append_desktop_log(&format!("failed to inject desktop bridge script: {error}"));
     }
 }
