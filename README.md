@@ -140,6 +140,8 @@ make prune
 
 推荐日常使用 `make update`，避免本地切换分支导致版本漂移。
 
+补充：`make build` 会默认使用当前 `package.json` 中的版本作为 `ASTRBOT_DESKTOP_VERSION`，避免构建前资源准备阶段把版本回写到其他值。若需覆盖，可显式传入 `ASTRBOT_DESKTOP_VERSION=...`。
+
 示例：
 
 ```bash

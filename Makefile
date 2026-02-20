@@ -73,6 +73,14 @@ dev:
 	pnpm run dev
 
 build:
+	@set -e; \
+	build_version="$(ASTRBOT_DESKTOP_VERSION)"; \
+	if [ -z "$$build_version" ]; then \
+		build_version="$$(node -e "console.log(require('./package.json').version)")"; \
+	fi; \
+	ASTRBOT_SOURCE_GIT_URL="$(ASTRBOT_SOURCE_GIT_URL)" \
+	ASTRBOT_SOURCE_GIT_REF="$(ASTRBOT_SOURCE_GIT_REF)" \
+	ASTRBOT_DESKTOP_VERSION="$$build_version" \
 	pnpm run build
 
 rebuild: clean build
