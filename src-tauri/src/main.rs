@@ -895,8 +895,9 @@ Content-Length: {}\r\n\
         let has_managed_child = match self.child.lock() {
             Ok(guard) => guard.is_some(),
             Err(error) => {
-                let message =
-                    format!("backend child lock poisoned while resolving restart strategy: {error}");
+                let message = format!(
+                    "backend child lock poisoned while resolving restart strategy: {error}"
+                );
                 append_desktop_log(&message);
                 return Err(message);
             }
