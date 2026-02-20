@@ -310,14 +310,24 @@ impl BackendState {
             .or_else(|| {
                 resolve_resource_path(app, "webui/index.html")
                     .and_then(|index_path| index_path.parent().map(Path::to_path_buf))
-            });
+            })
+            .ok_or_else(|| {
+                "Packaged WebUI directory is missing. Expected embedded resource: webui/index.html"
+                    .to_string()
+            })?;
+        if !webui_dir.join("index.html").is_file() {
+            return Err(format!(
+                "Packaged WebUI index is missing: {}",
+                webui_dir.join("index.html").display()
+            ));
+        }
 
         let plan = LaunchPlan {
             cmd: python_path.to_string_lossy().to_string(),
             args: vec![launch_script_path.to_string_lossy().to_string()],
             cwd,
             root_dir,
-            webui_dir,
+            webui_dir: Some(webui_dir),
             packaged_mode: true,
         };
         Ok(Some(plan))
