@@ -99,7 +99,13 @@ jobs:
           esac
 
           case "${nightly_utc_hour}" in
-            ''|*[!0-9]*) nightly_utc_hour="3" ;;
+            '')
+              nightly_utc_hour="3"
+              ;;
+            *[!0-9]*)
+              echo "WARN: non-numeric ASTRBOT_NIGHTLY_UTC_HOUR=${nightly_utc_hour}, fallback to 3."
+              nightly_utc_hour="3"
+              ;;
           esac
           if [ "${nightly_utc_hour}" -gt 23 ] 2>/dev/null; then
             echo "WARN: invalid ASTRBOT_NIGHTLY_UTC_HOUR=${nightly_utc_hour}, fallback to 3."
