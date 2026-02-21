@@ -2,8 +2,6 @@
 
 use serde::Deserialize;
 #[cfg(target_os = "windows")]
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
-#[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
     borrow::Cow,
@@ -2291,22 +2289,32 @@ fn normalize_backend_url(raw: &str) -> String {
 
 fn backend_ready_http_path() -> &'static str {
     BACKEND_READY_HTTP_PATH
-        .get_or_init(|| match env::var(BACKEND_READY_HTTP_PATH_ENV) {
-            Ok(raw) => {
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
-                } else if trimmed.starts_with('/') {
-                    trimmed.to_string()
-                } else {
-                    let normalized = format!("/{trimmed}");
-                    append_desktop_log(&format!(
-                        "{BACKEND_READY_HTTP_PATH_ENV} is missing leading '/': '{trimmed}', normalized to '{normalized}'"
-                    ));
-                    normalized
+        .get_or_init(|| match env::var_os(BACKEND_READY_HTTP_PATH_ENV) {
+            Some(raw) => match raw.into_string() {
+                Ok(raw_utf8) => {
+                    let trimmed = raw_utf8.trim();
+                    if trimmed.is_empty() {
+                        DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
+                    } else if trimmed.starts_with('/') {
+                        trimmed.to_string()
+                    } else {
+                        let normalized = format!("/{trimmed}");
+                        append_desktop_log(&format!(
+                            "{BACKEND_READY_HTTP_PATH_ENV} is missing leading '/': '{trimmed}', normalized to '{normalized}'"
+                        ));
+                        normalized
+                    }
                 }
-            }
-            Err(_) => DEFAULT_BACKEND_READY_HTTP_PATH.to_string(),
+                Err(non_utf8) => {
+                    append_desktop_log(&format!(
+                        "{BACKEND_READY_HTTP_PATH_ENV} contains non-UTF-8 value '{}', fallback to default '{}'",
+                        non_utf8.to_string_lossy(),
+                        DEFAULT_BACKEND_READY_HTTP_PATH
+                    ));
+                    DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
+                }
+            },
+            None => DEFAULT_BACKEND_READY_HTTP_PATH.to_string(),
         })
         .as_str()
 }
@@ -2346,37 +2354,29 @@ fn default_packaged_root_dir() -> Option<PathBuf> {
     home::home_dir().map(|home| home.join(".astrbot"))
 }
 
-type PathKey = OsString;
-
-fn path_key(path: &Path) -> Option<PathKey> {
+// Path keys are intentionally component-normalized, so entries like `/a/../b`
+// and `/b` deduplicate to the same key.
+// On Windows we apply ASCII case folding as a best-effort for case-insensitive PATHs.
+fn path_key(path: &Path) -> Option<OsString> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    let normalized_path: PathBuf = path.components().collect();
+    let normalized: PathBuf = path.components().collect();
     #[cfg(target_os = "windows")]
     {
-        let lowered_units: Vec<u16> = normalized_path
-            .as_os_str()
-            .encode_wide()
-            .map(|unit| {
-                if (b'A' as u16..=b'Z' as u16).contains(&unit) {
-                    unit + 32
-                } else {
-                    unit
-                }
-            })
-            .collect();
-        Some(OsString::from_wide(&lowered_units))
+        Some(OsString::from(
+            normalized.to_string_lossy().to_ascii_lowercase(),
+        ))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Some(normalized_path.into_os_string())
+        Some(normalized.into_os_string())
     }
 }
 
 fn add_path_candidate(
     candidate: PathBuf,
-    seen_keys: &mut HashSet<PathKey>,
+    seen_keys: &mut HashSet<OsString>,
     prepend_entries: &mut Vec<PathBuf>,
 ) {
     if !candidate.is_dir() {
@@ -2458,7 +2458,7 @@ fn backend_path_override() -> Option<OsString> {
 fn build_backend_path_override() -> Option<OsString> {
     let existing_path = env::var_os("PATH").unwrap_or_default();
     let existing_entries: Vec<PathBuf> = env::split_paths(&existing_path).collect();
-    let mut seen_keys: HashSet<PathKey> = existing_entries
+    let mut seen_keys: HashSet<OsString> = existing_entries
         .iter()
         .filter_map(|path| path_key(path))
         .collect();
