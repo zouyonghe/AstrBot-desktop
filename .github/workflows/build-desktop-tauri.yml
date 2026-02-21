@@ -394,7 +394,9 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && needs.resolve_build_context.outputs.publish_release == 'true' }}
+    # Gate on release_tag instead of raw publish_release output so downstream
+    # release decision does not depend on strict string equality edge-cases.
+    if: ${{ needs.resolve_build_context.outputs.should_build == 'true' && needs.resolve_build_context.outputs.release_tag != '' }}
     needs:
       - resolve_build_context
       - build-linux
