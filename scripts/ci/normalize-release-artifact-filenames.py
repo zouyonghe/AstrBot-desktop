@@ -25,10 +25,38 @@ ARCH_ALIAS = {
     "aarch64": "arm64",
     "arm64": "arm64",
 }
+WARNED_UNKNOWN_ARCHES: set[str] = set()
 
 
 def normalize_arch(arch: str) -> str:
-    return ARCH_ALIAS.get(arch, arch)
+    normalized = ARCH_ALIAS.get(arch)
+    if normalized is not None:
+        return normalized
+    if arch not in WARNED_UNKNOWN_ARCHES:
+        WARNED_UNKNOWN_ARCHES.add(arch)
+        print(
+            f"::warning::[normalize-artifacts] unknown architecture alias '{arch}', keeping as-is"
+        )
+    return arch
+
+
+def resolve_nightly_source_sha(source_git_ref: str) -> tuple[str, bool]:
+    """Resolve a commit-like SHA from source_git_ref.
+
+    Returns (sha, normalized_from_path_component).
+    """
+    candidate = source_git_ref.strip()
+    if HEX_SHA_PATTERN.fullmatch(candidate):
+        return candidate, False
+
+    tail = candidate.rsplit("/", 1)[-1]
+    if HEX_SHA_PATTERN.fullmatch(tail):
+        return tail, True
+
+    raise RuntimeError(
+        "nightly build requires --source-git-ref to be a hex commit SHA (8-64 chars), "
+        "or to end with one (for example: origin/<sha>)"
+    )
 
 
 def should_normalize_file(path: pathlib.Path) -> bool:
@@ -42,14 +70,14 @@ def canonicalize_stem(stem: str, ext: str) -> tuple[str, bool]:
     # RPM: AstrBot-<ver>-<rel>.<arch> or AstrBot_<ver>_<arch>
     if ext == ".rpm":
         match = re.fullmatch(
-            r"AstrBot-([0-9A-Za-z.+-]+)-\d+\.(x86_64|aarch64|amd64|arm64)",
+            r"AstrBot-([0-9A-Za-z.+-]+)-\d+\.([A-Za-z0-9_]+)",
             stem,
         )
         if match:
             version, arch = match.groups()
             return f"AstrBot_{version}_{normalize_arch(arch)}", True
         match = re.fullmatch(
-            r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)",
+            r"AstrBot_([0-9A-Za-z.+-]+)_([A-Za-z0-9_]+)",
             stem,
         )
         if match:
@@ -59,7 +87,7 @@ def canonicalize_stem(stem: str, ext: str) -> tuple[str, bool]:
     # DEB: AstrBot_<ver>_<arch>
     if ext == ".deb":
         match = re.fullmatch(
-            r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)",
+            r"AstrBot_([0-9A-Za-z.+-]+)_([A-Za-z0-9_]+)",
             stem,
         )
         if match:
@@ -69,7 +97,7 @@ def canonicalize_stem(stem: str, ext: str) -> tuple[str, bool]:
     # EXE: AstrBot_<ver>_<arch>-setup or _setup
     if ext == ".exe":
         match = re.fullmatch(
-            r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)(?:-setup|_setup)",
+            r"AstrBot_([0-9A-Za-z.+-]+)_([A-Za-z0-9_]+)(?:-setup|_setup)",
             stem,
         )
         if match:
@@ -79,7 +107,7 @@ def canonicalize_stem(stem: str, ext: str) -> tuple[str, bool]:
     # MSI: AstrBot_<ver>_<arch>_<locale>
     if ext == ".msi":
         match = re.fullmatch(
-            r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)_([A-Za-z0-9-]+)",
+            r"AstrBot_([0-9A-Za-z.+-]+)_([A-Za-z0-9_]+)_([A-Za-z0-9-]+)",
             stem,
         )
         if match:
@@ -89,7 +117,7 @@ def canonicalize_stem(stem: str, ext: str) -> tuple[str, bool]:
     # macOS zip: AstrBot_<ver>_macos_<arch>
     if ext == ".zip":
         match = re.fullmatch(
-            r"AstrBot_([0-9A-Za-z.+-]+)_macos_(x86_64|aarch64|x64|amd64|arm64)",
+            r"AstrBot_([0-9A-Za-z.+-]+)_macos_([A-Za-z0-9_]+)",
             stem,
         )
         if match:
@@ -131,12 +159,19 @@ def main() -> int:
     build_mode = args.build_mode.strip().lower()
     source_git_ref = args.source_git_ref.strip()
     is_nightly = build_mode == "nightly"
-    short_sha = source_git_ref[:8]
+    resolved_source_sha = ""
+    normalized_sha_from_path_component = False
+    if is_nightly:
+        resolved_source_sha, normalized_sha_from_path_component = resolve_nightly_source_sha(
+            source_git_ref
+        )
+    short_sha = resolved_source_sha[:8]
     nightly_suffix = f"_nightly_{short_sha}" if is_nightly else ""
 
-    if is_nightly and not HEX_SHA_PATTERN.fullmatch(source_git_ref):
-        raise RuntimeError(
-            "nightly build requires --source-git-ref to be a hex commit SHA (8-64 chars)"
+    if normalized_sha_from_path_component:
+        print(
+            "::warning::[normalize-artifacts] nightly source_git_ref was not a bare SHA; "
+            f"using trailing SHA component '{resolved_source_sha}'."
         )
 
     unmatched_messages: list[str] = []
