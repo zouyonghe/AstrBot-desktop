@@ -8,7 +8,7 @@ on:
         required: false
         default: https://github.com/AstrBotDevs/AstrBot.git
       source_git_ref:
-        description: Optional source ref override for `tag-poll` (tag/commit SHA). Ignored in `nightly`.
+        description: Optional source ref override for `tag-poll` (branch/tag/commit SHA). Ignored in `nightly`.
         required: false
         default: ""
       publish_release:

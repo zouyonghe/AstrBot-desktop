@@ -85,13 +85,17 @@ source_git_url="${ASTRBOT_SOURCE_GIT_URL}"
 source_git_ref="${ASTRBOT_SOURCE_GIT_REF}"
 nightly_source_git_ref="${ASTRBOT_NIGHTLY_SOURCE_GIT_REF:-master}"
 nightly_utc_hour="${ASTRBOT_NIGHTLY_UTC_HOUR:-${DEFAULT_NIGHTLY_UTC_HOUR}}"
-if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-  requested_build_mode="$(printf '%s' "${WORKFLOW_BUILD_MODE:-nightly}" | tr '[:upper:]' '[:lower:]')"
-else
-  requested_build_mode="auto"
+workflow_build_mode_raw="${WORKFLOW_BUILD_MODE:-}"
+if [ -z "${workflow_build_mode_raw}" ]; then
+  if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+    workflow_build_mode_raw="nightly"
+  else
+    workflow_build_mode_raw="auto"
+  fi
 fi
+requested_build_mode="$(printf '%s' "${workflow_build_mode_raw}" | tr '[:upper:]' '[:lower:]')"
 should_build="true"
-build_mode="nightly"
+build_mode="${requested_build_mode}"
 publish_release="false"
 release_tag=""
 release_name=""
@@ -161,6 +165,10 @@ if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
     publish_release="true"
     echo "Scheduled tag polling run at UTC hour ${current_utc_hour}."
   fi
+fi
+
+if [ "${build_mode}" = "auto" ]; then
+  build_mode="tag-poll"
 fi
 
 retry_attempts="$(
