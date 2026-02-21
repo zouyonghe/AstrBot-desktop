@@ -36,6 +36,8 @@ const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
 const GRACEFUL_STOP_TIMEOUT_MS: u64 = 10_000;
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
 #[cfg(target_os = "windows")]
+const WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS: u64 = 350;
+#[cfg(target_os = "windows")]
 const FORCE_STOP_WAIT_MAX_WINDOWS_MS: u64 = 2_200;
 #[cfg(not(target_os = "windows"))]
 const FORCE_STOP_WAIT_MAX_NON_WINDOWS_MS: u64 = 1_500;
@@ -2608,17 +2610,38 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
     );
     log_child_poll_state(child, "after taskkill graceful stop", pid);
 
+    let graceful_wait_timeout = match &graceful_status {
+        Ok(status) if status.success() => timeout,
+        Ok(status) => {
+            let shortened_wait = Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS);
+            append_desktop_log(&format!(
+                "taskkill graceful stop returned non-zero; skip long graceful wait: pid={pid}, status={status:?}, shortened_wait_ms={}",
+                shortened_wait.as_millis()
+            ));
+            shortened_wait
+        }
+        Err(error) => {
+            let shortened_wait = Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS);
+            append_desktop_log(&format!(
+                "taskkill graceful stop failed to start; skip long graceful wait: pid={pid}, error={error}, shortened_wait_ms={}",
+                shortened_wait.as_millis()
+            ));
+            shortened_wait
+        }
+    };
+
     let graceful_wait_start = Instant::now();
-    if wait_for_child_exit(child, timeout) {
+    if wait_for_child_exit(child, graceful_wait_timeout) {
         append_desktop_log(&format!(
-            "child exited during graceful wait: pid={pid}, elapsed_ms={}",
-            graceful_wait_start.elapsed().as_millis()
+            "child exited during graceful wait: pid={pid}, elapsed_ms={}, wait_budget_ms={}",
+            graceful_wait_start.elapsed().as_millis(),
+            graceful_wait_timeout.as_millis()
         ));
         return true;
     }
     append_desktop_log(&format!(
         "child still running after graceful wait timeout: pid={pid}, timeout_ms={}",
-        timeout.as_millis()
+        graceful_wait_timeout.as_millis()
     ));
 
     log_child_poll_state(child, "before taskkill force stop", pid);
