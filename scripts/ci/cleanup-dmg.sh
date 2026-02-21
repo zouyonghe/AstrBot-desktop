@@ -37,9 +37,7 @@ fi
 case "${detach_pre_sleep_seconds}" in
   ''|*[!0-9]*) detach_pre_sleep_seconds=8 ;;
 esac
-if [ "${detach_pre_sleep_seconds}" -lt 0 ] 2>/dev/null; then
-  detach_pre_sleep_seconds=0
-elif [ "${detach_pre_sleep_seconds}" -gt 120 ] 2>/dev/null; then
+if [ "${detach_pre_sleep_seconds}" -gt 120 ] 2>/dev/null; then
   detach_pre_sleep_seconds=120
 fi
 
@@ -141,16 +139,16 @@ select_canonicalize_tool() {
 select_canonicalize_tool
 
 select_lsof_timeout_tool() {
-  if command -v python3 >/dev/null 2>&1; then
-    lsof_timeout_tool="python3"
-    return
-  fi
   if command -v gtimeout >/dev/null 2>&1; then
     lsof_timeout_tool="gtimeout"
     return
   fi
   if command -v timeout >/dev/null 2>&1; then
     lsof_timeout_tool="timeout"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    lsof_timeout_tool="python3"
     return
   fi
   lsof_timeout_tool=""
