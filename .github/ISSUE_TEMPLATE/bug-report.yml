@@ -38,8 +38,8 @@ body:
   - type: input
     attributes:
       label: Desktop version / 桌面端版本
-      description: e.g. 4.17.6
-      placeholder: 4.x.x
+      description: e.g. v4.17.6
+      placeholder: v4.x.x
     validations:
       required: true
 
@@ -103,4 +103,3 @@ body:
       options:
         - label: I agree to follow the project's Code of Conduct. / 我同意遵守项目行为准则。
           required: true
-
