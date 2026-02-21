@@ -215,6 +215,28 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Preflight macOS app bundle name resolution
+        env:
+          ASTRBOT_MACOS_APP_BUNDLE_NAME: ${{ vars.ASTRBOT_MACOS_APP_BUNDLE_NAME || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ASTRBOT_MACOS_APP_BUNDLE_NAME}" ]; then
+            echo "Using app bundle name from ASTRBOT_MACOS_APP_BUNDLE_NAME=${ASTRBOT_MACOS_APP_BUNDLE_NAME}"
+            exit 0
+          fi
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is required to resolve app bundle name from src-tauri/tauri.conf.json productName." >&2
+            exit 1
+          fi
+          python3 --version
+
+          if [ ! -f "src-tauri/tauri.conf.json" ]; then
+            echo "Required file not found: src-tauri/tauri.conf.json (or set ASTRBOT_MACOS_APP_BUNDLE_NAME)." >&2
+            exit 1
+          fi
+
       - name: Build desktop app bundle (macOS)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
@@ -248,6 +270,7 @@ jobs:
           set -euo pipefail
           bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
           app_bundle_name="${ASTRBOT_MACOS_APP_BUNDLE_NAME}"
+          app_bundle_name_source="env:ASTRBOT_MACOS_APP_BUNDLE_NAME"
           if [ -z "${app_bundle_name}" ]; then
             if ! command -v python3 >/dev/null 2>&1; then
               echo "python3 is required to resolve app bundle name from tauri config." >&2
@@ -259,12 +282,14 @@ jobs:
               exit 1
             fi
             app_bundle_name="$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path('${tauri_conf_path}').read_text(encoding='utf-8')); print(str(d.get('productName','')).strip())")"
+            app_bundle_name_source="tauri.conf.json productName"
           fi
 
           if [ -z "${app_bundle_name}" ]; then
             echo "Unable to resolve app bundle name from ASTRBOT_MACOS_APP_BUNDLE_NAME or src-tauri/tauri.conf.json productName." >&2
             exit 1
           fi
+          echo "Resolved app bundle name: ${app_bundle_name} (source=${app_bundle_name_source})"
 
           app_path="${bundle_dir}/${app_bundle_name}.app"
           if [ ! -d "${app_path}" ]; then
