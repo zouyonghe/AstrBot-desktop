@@ -428,7 +428,7 @@ impl BackendState {
                 "PYTHONIOENCODING",
                 env::var("PYTHONIOENCODING").unwrap_or_else(|_| "utf-8".to_string()),
             );
-        if let Some(path_override) = build_backend_path_override() {
+        if let Some(path_override) = cached_backend_path_override() {
             command.env("PATH", path_override);
         }
         #[cfg(target_os = "windows")]
@@ -2298,13 +2298,20 @@ type PathDedupKey = OsString;
 fn path_dedup_key(path: &Path) -> PathDedupKey {
     #[cfg(target_os = "windows")]
     {
-        path.as_os_str()
+        let normalized_path: PathBuf = path.components().collect();
+        normalized_path
+            .as_os_str()
             .encode_wide()
             .map(|unit| {
-                if (b'A' as u16..=b'Z' as u16).contains(&unit) {
-                    unit + 32
+                let normalized_unit = if unit == b'/' as u16 {
+                    b'\\' as u16
                 } else {
                     unit
+                };
+                if (b'A' as u16..=b'Z' as u16).contains(&normalized_unit) {
+                    normalized_unit + 32
+                } else {
+                    normalized_unit
                 }
             })
             .collect()
@@ -2313,6 +2320,13 @@ fn path_dedup_key(path: &Path) -> PathDedupKey {
     {
         path.as_os_str().to_os_string()
     }
+}
+
+fn cached_backend_path_override() -> Option<&'static OsString> {
+    static CACHED_BACKEND_PATH_OVERRIDE: OnceLock<Option<OsString>> = OnceLock::new();
+    CACHED_BACKEND_PATH_OVERRIDE
+        .get_or_init(build_backend_path_override)
+        .as_ref()
 }
 
 fn build_backend_path_override() -> Option<OsString> {
