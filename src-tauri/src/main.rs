@@ -36,6 +36,8 @@ const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
 const GRACEFUL_STOP_TIMEOUT_MS: u64 = 10_000;
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
 #[cfg(target_os = "windows")]
+const WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS: u64 = 350;
+#[cfg(target_os = "windows")]
 const FORCE_STOP_WAIT_MAX_WINDOWS_MS: u64 = 2_200;
 #[cfg(not(target_os = "windows"))]
 const FORCE_STOP_WAIT_MAX_NON_WINDOWS_MS: u64 = 1_500;
@@ -111,6 +113,9 @@ struct BackendState {
     is_spawning: AtomicBool,
     is_restarting: AtomicBool,
     exit_cleanup_started: AtomicBool,
+    // One-shot allowance consumed by the next ExitRequested event.
+    // This is set only after backend cleanup finishes so our internal
+    // app_handle.exit(0) can pass through instead of being prevented again.
     allow_next_exit_request: AtomicBool,
 }
 
@@ -2517,12 +2522,18 @@ fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
 }
 
 fn run_stop_command(pid: u32, label: &str, program: &str, args: &[&str]) -> io::Result<ExitStatus> {
-    let status = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .status();
+        .stdin(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        // Avoid flashing transient black console windows when invoking taskkill.
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let status = command.status();
 
     match &status {
         Ok(exit_status) if exit_status.success() => {}
@@ -2547,6 +2558,33 @@ fn compute_followup_wait(timeout: Duration, max_extra_wait: Duration) -> Duratio
     }
 }
 
+fn resolve_graceful_wait_timeout(
+    pid: u32,
+    timeout: Duration,
+    non_success_wait_cap: Duration,
+    graceful_status: &io::Result<ExitStatus>,
+    command_label: &str,
+) -> Duration {
+    match graceful_status {
+        Ok(status) if status.success() => timeout,
+        _ => {
+            let shortened_wait = timeout.min(non_success_wait_cap);
+            if shortened_wait < timeout {
+                let outcome = match graceful_status {
+                    Ok(status) => format!("status={status:?}"),
+                    Err(error) => format!("error={error}"),
+                };
+                append_desktop_log(&format!(
+                    "{command_label} not successful; shorten graceful wait: pid={pid}, {outcome}, requested_wait_ms={}, effective_wait_ms={}",
+                    timeout.as_millis(),
+                    shortened_wait.as_millis()
+                ));
+            }
+            shortened_wait
+        }
+    }
+}
+
 /// Attempt to stop a child process gracefully within `timeout`.
 ///
 /// On the force-kill path, a follow-up wait is derived from `timeout` (`timeout / 4`)
@@ -2565,7 +2603,15 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
         &["/pid", &pid_arg, "/t"],
     );
 
-    if wait_for_child_exit(child, timeout) {
+    let graceful_wait_timeout = resolve_graceful_wait_timeout(
+        pid,
+        timeout,
+        Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS),
+        &graceful_status,
+        "taskkill graceful stop",
+    );
+
+    if wait_for_child_exit(child, graceful_wait_timeout) {
         return true;
     }
 
@@ -2594,7 +2640,9 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
 
     let graceful_status = run_stop_command(pid, "kill -TERM", "kill", &["-TERM", &pid_arg]);
 
-    if wait_for_child_exit(child, timeout) {
+    let graceful_wait_timeout =
+        resolve_graceful_wait_timeout(pid, timeout, timeout, &graceful_status, "kill -TERM");
+    if wait_for_child_exit(child, graceful_wait_timeout) {
         return true;
     }
 
