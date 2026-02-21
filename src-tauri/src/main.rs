@@ -69,7 +69,6 @@ static BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static BRIDGE_BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
-static BACKEND_PATH_OVERRIDE: OnceLock<Option<OsString>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -427,7 +426,7 @@ impl BackendState {
                 "PYTHONIOENCODING",
                 env::var("PYTHONIOENCODING").unwrap_or_else(|_| "utf-8".to_string()),
             );
-        if let Some(path_override) = backend_path_override() {
+        if let Some(path_override) = build_backend_path_override() {
             command.env("PATH", path_override);
         }
         #[cfg(target_os = "windows")]
@@ -2289,39 +2288,78 @@ fn default_packaged_root_dir() -> Option<PathBuf> {
     home::home_dir().map(|home| home.join(".astrbot"))
 }
 
-#[cfg(target_os = "windows")]
-type PathDedupKey = String;
-#[cfg(not(target_os = "windows"))]
-type PathDedupKey = OsString;
-
-fn path_dedup_key(path: &Path) -> Option<PathDedupKey> {
-    let normalized_path = path.canonicalize().ok()?;
+fn path_key(path: &Path) -> Option<OsString> {
+    if path.as_os_str().is_empty() {
+        return None;
+    }
     #[cfg(target_os = "windows")]
     {
-        Some(normalized_path.to_string_lossy().to_ascii_lowercase())
+        Some(OsString::from(path.to_string_lossy().to_ascii_lowercase()))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Some(normalized_path.into_os_string())
+        Some(path.as_os_str().to_os_string())
     }
 }
 
 fn add_path_candidate(
     candidate: PathBuf,
-    seen_keys: &mut HashSet<PathDedupKey>,
+    seen_keys: &mut HashSet<OsString>,
     prepend_entries: &mut Vec<PathBuf>,
 ) {
-    if candidate.as_os_str().is_empty() {
-        return;
-    }
     if !candidate.is_dir() {
         return;
     }
-    if let Some(key) = path_dedup_key(&candidate) {
+    if let Some(key) = path_key(&candidate) {
         if seen_keys.insert(key) {
             prepend_entries.push(candidate);
         }
     }
+}
+
+fn platform_extra_paths(home: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+
+    if let Some(home_dir) = home {
+        result.push(home_dir.join(".local").join("bin"));
+        #[cfg(target_os = "macos")]
+        {
+            result.push(home_dir.join(".nvm").join("current").join("bin"));
+        }
+    }
+
+    if let Some(nvm_bin) = env::var_os("NVM_BIN") {
+        result.push(PathBuf::from(nvm_bin));
+    }
+    if let Some(volta_home) = env::var_os("VOLTA_HOME") {
+        result.push(PathBuf::from(volta_home).join("bin"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for raw in [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+        ] {
+            result.push(PathBuf::from(raw));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(app_data) = env::var_os("APPDATA") {
+            result.push(PathBuf::from(app_data).join("npm"));
+        }
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            let local_app_data = PathBuf::from(local_app_data);
+            result.push(local_app_data.join("Programs").join("nodejs"));
+            result.push(local_app_data.join("nvm"));
+        }
+    }
+
+    result
 }
 
 fn log_backend_path_augmentation(prepend_entries: &[PathBuf]) {
@@ -2339,18 +2377,12 @@ fn log_backend_path_augmentation(prepend_entries: &[PathBuf]) {
     ));
 }
 
-fn backend_path_override() -> Option<OsString> {
-    BACKEND_PATH_OVERRIDE
-        .get_or_init(build_backend_path_override)
-        .clone()
-}
-
 fn build_backend_path_override() -> Option<OsString> {
     let existing_path = env::var_os("PATH").unwrap_or_default();
     let existing_entries: Vec<PathBuf> = env::split_paths(&existing_path).collect();
-    let mut seen_keys: HashSet<PathDedupKey> = existing_entries
+    let mut seen_keys: HashSet<OsString> = existing_entries
         .iter()
-        .filter_map(|path| path_dedup_key(path))
+        .filter_map(|path| path_key(path))
         .collect();
 
     let mut prepend_entries: Vec<PathBuf> = Vec::new();
@@ -2361,68 +2393,8 @@ fn build_backend_path_override() -> Option<OsString> {
         }
     }
 
-    if let Some(home) = home::home_dir() {
-        add_path_candidate(
-            home.join(".local").join("bin"),
-            &mut seen_keys,
-            &mut prepend_entries,
-        );
-        #[cfg(target_os = "macos")]
-        {
-            add_path_candidate(
-                home.join(".nvm").join("current").join("bin"),
-                &mut seen_keys,
-                &mut prepend_entries,
-            );
-        }
-    }
-
-    if let Some(nvm_bin) = env::var_os("NVM_BIN") {
-        add_path_candidate(PathBuf::from(nvm_bin), &mut seen_keys, &mut prepend_entries);
-    }
-    if let Some(volta_home) = env::var_os("VOLTA_HOME") {
-        add_path_candidate(
-            PathBuf::from(volta_home).join("bin"),
-            &mut seen_keys,
-            &mut prepend_entries,
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        for raw in [
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            "/usr/local/sbin",
-        ] {
-            add_path_candidate(PathBuf::from(raw), &mut seen_keys, &mut prepend_entries);
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(app_data) = env::var_os("APPDATA") {
-            add_path_candidate(
-                PathBuf::from(app_data).join("npm"),
-                &mut seen_keys,
-                &mut prepend_entries,
-            );
-        }
-        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-            add_path_candidate(
-                PathBuf::from(&local_app_data)
-                    .join("Programs")
-                    .join("nodejs"),
-                &mut seen_keys,
-                &mut prepend_entries,
-            );
-            add_path_candidate(
-                PathBuf::from(local_app_data).join("nvm"),
-                &mut seen_keys,
-                &mut prepend_entries,
-            );
-        }
+    for path in platform_extra_paths(home::home_dir()) {
+        add_path_candidate(path, &mut seen_keys, &mut prepend_entries);
     }
 
     if prepend_entries.is_empty() {
