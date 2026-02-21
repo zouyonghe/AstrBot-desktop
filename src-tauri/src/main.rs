@@ -7,7 +7,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     env,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     net::{IpAddr, TcpStream, ToSocketAddrs},
@@ -546,22 +546,23 @@ impl BackendState {
         let readiness = backend_readiness_config();
         let start_time = Instant::now();
         let mut tcp_ready_logged = false;
+        let mut ever_tcp_reachable = false;
 
         loop {
-            let (http_status, tcp_reachable) = self.probe_backend_readiness(
-                &readiness.path,
-                readiness.probe_timeout_ms,
-                !tcp_ready_logged,
-            );
+            let (http_status, tcp_reachable) =
+                self.probe_backend_readiness(&readiness.path, readiness.probe_timeout_ms);
             if matches!(http_status, Some(status_code) if (200..400).contains(&status_code)) {
                 return Ok(());
             }
 
-            if !tcp_ready_logged && tcp_reachable {
-                append_desktop_log(
-                    "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
-                );
-                tcp_ready_logged = true;
+            if tcp_reachable {
+                ever_tcp_reachable = true;
+                if !tcp_ready_logged {
+                    append_desktop_log(
+                        "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
+                    );
+                    tcp_ready_logged = true;
+                }
             }
 
             {
@@ -594,7 +595,7 @@ impl BackendState {
                         &readiness.path,
                         readiness.probe_timeout_ms,
                         http_status,
-                        tcp_ready_logged || tcp_reachable,
+                        ever_tcp_reachable,
                     );
                     return Err(format!(
                         "Timed out after {}ms waiting for backend startup.",
@@ -611,12 +612,11 @@ impl BackendState {
         &self,
         ready_http_path: &str,
         probe_timeout_ms: u64,
-        check_tcp_reachable: bool,
     ) -> (Option<u16>, bool) {
         let http_status =
             self.request_backend_status_code("GET", ready_http_path, probe_timeout_ms, None, None);
         let tcp_timeout_ms = probe_timeout_ms.min(BACKEND_READY_TCP_PROBE_TIMEOUT_MAX_MS);
-        let tcp_reachable = check_tcp_reachable && self.ping_backend(tcp_timeout_ms);
+        let tcp_reachable = self.ping_backend(tcp_timeout_ms);
         (http_status, tcp_reachable)
     }
 
@@ -2331,40 +2331,35 @@ fn normalize_backend_url(raw: &str) -> String {
     }
 }
 
-fn normalize_backend_ready_http_path(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        append_desktop_log(&format!(
-            "{BACKEND_READY_HTTP_PATH_ENV} is empty/whitespace, fallback to default '{}'",
-            DEFAULT_BACKEND_READY_HTTP_PATH
-        ));
-        return DEFAULT_BACKEND_READY_HTTP_PATH.to_string();
-    }
-    if trimmed.starts_with('/') {
-        return trimmed.to_string();
-    }
-
-    let normalized = format!("/{trimmed}");
-    append_desktop_log(&format!(
-        "{BACKEND_READY_HTTP_PATH_ENV} is missing leading '/': '{trimmed}', normalized to '{normalized}'"
-    ));
-    normalized
-}
-
-fn default_backend_ready_http_path_for_non_utf8(raw: &OsStr) -> String {
-    append_desktop_log(&format!(
-        "{BACKEND_READY_HTTP_PATH_ENV} contains non-UTF-8 value '{}', fallback to default '{}'",
-        raw.to_string_lossy(),
-        DEFAULT_BACKEND_READY_HTTP_PATH
-    ));
-    DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
-}
-
 fn resolve_backend_ready_http_path() -> String {
     match env::var_os(BACKEND_READY_HTTP_PATH_ENV) {
         Some(raw) => match raw.to_str() {
-            Some(raw_utf8) => normalize_backend_ready_http_path(raw_utf8),
-            None => default_backend_ready_http_path_for_non_utf8(raw.as_os_str()),
+            Some(raw_utf8) => {
+                let trimmed = raw_utf8.trim();
+                if trimmed.is_empty() {
+                    append_desktop_log(&format!(
+                        "{BACKEND_READY_HTTP_PATH_ENV} is empty/whitespace, fallback to default '{}'",
+                        DEFAULT_BACKEND_READY_HTTP_PATH
+                    ));
+                    DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
+                } else if trimmed.starts_with('/') {
+                    trimmed.to_string()
+                } else {
+                    let normalized = format!("/{trimmed}");
+                    append_desktop_log(&format!(
+                        "{BACKEND_READY_HTTP_PATH_ENV} is missing leading '/': '{trimmed}', normalized to '{normalized}'"
+                    ));
+                    normalized
+                }
+            }
+            None => {
+                append_desktop_log(&format!(
+                    "{BACKEND_READY_HTTP_PATH_ENV} contains non-UTF-8 value '{}', fallback to default '{}'",
+                    raw.to_string_lossy(),
+                    DEFAULT_BACKEND_READY_HTTP_PATH
+                ));
+                DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
+            }
         },
         None => DEFAULT_BACKEND_READY_HTTP_PATH.to_string(),
     }
@@ -3014,14 +3009,22 @@ fn parse_clamped_timeout_env(
     }
 }
 
+fn parse_ping_timeout_env(raw: &str, env_name: &str, fallback_ms: u64) -> u64 {
+    parse_clamped_timeout_env(
+        raw,
+        env_name,
+        fallback_ms,
+        BACKEND_PING_TIMEOUT_MIN_MS,
+        BACKEND_PING_TIMEOUT_MAX_MS,
+    )
+}
+
 fn backend_ping_timeout_ms() -> u64 {
     *BACKEND_PING_TIMEOUT_MS.get_or_init(|| match env::var(BACKEND_PING_TIMEOUT_ENV) {
-        Ok(raw) => parse_clamped_timeout_env(
+        Ok(raw) => parse_ping_timeout_env(
             &raw,
             BACKEND_PING_TIMEOUT_ENV,
             DEFAULT_BACKEND_PING_TIMEOUT_MS,
-            BACKEND_PING_TIMEOUT_MIN_MS,
-            BACKEND_PING_TIMEOUT_MAX_MS,
         ),
         Err(_) => DEFAULT_BACKEND_PING_TIMEOUT_MS,
     })
@@ -3031,13 +3034,7 @@ fn bridge_backend_ping_timeout_ms() -> u64 {
     *BRIDGE_BACKEND_PING_TIMEOUT_MS.get_or_init(|| {
         let fallback = backend_ping_timeout_ms();
         match env::var(BRIDGE_BACKEND_PING_TIMEOUT_ENV) {
-            Ok(raw) => parse_clamped_timeout_env(
-                &raw,
-                BRIDGE_BACKEND_PING_TIMEOUT_ENV,
-                fallback,
-                BACKEND_PING_TIMEOUT_MIN_MS,
-                BACKEND_PING_TIMEOUT_MAX_MS,
-            ),
+            Ok(raw) => parse_ping_timeout_env(&raw, BRIDGE_BACKEND_PING_TIMEOUT_ENV, fallback),
             Err(_) => fallback,
         }
     })
