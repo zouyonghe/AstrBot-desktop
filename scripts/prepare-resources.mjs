@@ -8,11 +8,6 @@ const DEFAULT_ASTRBOT_SOURCE_GIT_URL = 'https://github.com/AstrBotDevs/AstrBot.g
 const sourceRepoUrlRaw =
   process.env.ASTRBOT_SOURCE_GIT_URL?.trim() || DEFAULT_ASTRBOT_SOURCE_GIT_URL;
 const sourceRepoRefRaw = process.env.ASTRBOT_SOURCE_GIT_REF?.trim() || '';
-const sourceRepoRefIsCommitHintRaw =
-  String(process.env.ASTRBOT_SOURCE_GIT_REF_IS_COMMIT || '')
-    .trim()
-    .toLowerCase();
-const SOURCE_REPO_REF_COMMIT_HINT_TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 const desktopVersionOverride = process.env.ASTRBOT_DESKTOP_VERSION?.trim() || '';
 const PYTHON_BUILD_STANDALONE_RELEASE =
   process.env.ASTRBOT_PBS_RELEASE?.trim() || '20260211';
@@ -47,14 +42,30 @@ const normalizeSourceRepoConfig = () => {
 };
 
 const { repoUrl: sourceRepoUrl, repoRef: sourceRepoRefResolved } = normalizeSourceRepoConfig();
-const sourceRepoRef = typeof sourceRepoRefResolved === 'string' ? sourceRepoRefResolved.trim() : '';
-const GIT_COMMIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
-const VERSION_TAG_REF_PATTERN = /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
-const isSourceRepoRefCommitSha =
-  (!!sourceRepoRef &&
-    GIT_COMMIT_SHA_PATTERN.test(sourceRepoRef)) ||
-  SOURCE_REPO_REF_COMMIT_HINT_TRUTHY.has(sourceRepoRefIsCommitHintRaw);
-const isSourceRepoRefVersionTag = VERSION_TAG_REF_PATTERN.test(sourceRepoRef);
+const SOURCE_REPO_REF_COMMIT_HINT_TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+// Accept full SHAs and longer abbreviated SHAs (>= 12) to reduce false positives
+// from hex-looking branch/tag names while still supporting common CI short refs.
+const GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{12,64}$/i;
+// Treat both `v1.2.3` and `1.2.3` style refs as release tags.
+const VERSION_TAG_REF_PATTERN = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+const getSourceRefInfo = (resolvedRef) => {
+  const ref = typeof resolvedRef === 'string' ? resolvedRef.trim() : '';
+  const commitHintRaw = String(process.env.ASTRBOT_SOURCE_GIT_REF_IS_COMMIT || '')
+    .trim()
+    .toLowerCase();
+  const hasExplicitCommitHint = SOURCE_REPO_REF_COMMIT_HINT_TRUTHY.has(commitHintRaw);
+  const isCommit = !!ref && (GIT_COMMIT_SHA_PATTERN.test(ref) || hasExplicitCommitHint);
+  const isVersionTag = VERSION_TAG_REF_PATTERN.test(ref);
+
+  return { ref, isCommit, isVersionTag };
+};
+
+const {
+  ref: sourceRepoRef,
+  isCommit: isSourceRepoRefCommitSha,
+  isVersionTag: isSourceRepoRefVersionTag,
+} = getSourceRefInfo(sourceRepoRefResolved);
 
 const resolveSourceDir = () => {
   const fromEnv = process.env.ASTRBOT_SOURCE_DIR?.trim();
@@ -296,18 +307,23 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
 
 const verifyDesktopBridgeArtifacts = async (dashboardDir) => {
   const issues = [];
-  const enforceRequiredExpectations =
-    isDesktopBridgeExpectationStrict || !isSourceRepoRefVersionTag;
-  if (!enforceRequiredExpectations) {
+  const isTaggedRelease = isSourceRepoRefVersionTag;
+  if (!isDesktopBridgeExpectationStrict && isTaggedRelease) {
     console.warn(
       `[prepare-resources] Desktop bridge required checks downgraded to warnings for source ref ${sourceRepoRef}. ` +
         'Set ASTRBOT_DESKTOP_STRICT_BRIDGE_EXPECTATIONS=1 to enforce.',
     );
   }
 
+  const shouldEnforceDesktopBridgeExpectation = (expectation) => {
+    if (isDesktopBridgeExpectationStrict) {
+      return true;
+    }
+    return expectation.required && !isTaggedRelease;
+  };
+
   for (const expectation of DESKTOP_BRIDGE_EXPECTATIONS) {
-    const mustPass =
-      isDesktopBridgeExpectationStrict || (expectation.required && enforceRequiredExpectations);
+    const mustPass = shouldEnforceDesktopBridgeExpectation(expectation);
     const file = path.join(dashboardDir, ...expectation.filePath);
     if (!existsSync(file)) {
       const relativePath = path.relative(projectRoot, file);
