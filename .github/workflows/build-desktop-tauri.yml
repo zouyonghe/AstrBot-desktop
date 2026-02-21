@@ -17,7 +17,7 @@ on:
         type: boolean
         default: true
       build_mode:
-        description: Build mode (`auto` | `tag-poll` | `nightly`); for workflow_dispatch, `auto` behaves as `manual`
+        description: Build mode (`auto` | `tag-poll` | `nightly`); for workflow_dispatch, `auto` behaves as `manual` and disables publish_release
         required: false
         type: choice
         default: auto

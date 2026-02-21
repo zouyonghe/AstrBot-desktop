@@ -6,6 +6,16 @@ DEFAULT_NIGHTLY_UTC_HOUR='3'
 DEFAULT_LS_REMOTE_RETRY_ATTEMPTS='3'
 DEFAULT_LS_REMOTE_RETRY_SLEEP_SECONDS='2'
 
+temp_dirs=()
+cleanup_temp_dirs() {
+  local dir
+  for dir in "${temp_dirs[@]-}"; do
+    [ -n "${dir}" ] || continue
+    rm -rf "${dir}" 2>/dev/null || true
+  done
+}
+trap cleanup_temp_dirs EXIT
+
 is_transient_git_error() {
   local message="$1"
   printf '%s' "${message}" | grep -Eiq \
@@ -63,7 +73,11 @@ git_ls_remote_with_retry() {
     attempt=$((attempt + 1))
   done
 
-  echo "::error::Unable to resolve ${label} from ${source_url} after ${attempt} attempt(s)."
+  local final_attempt="${attempt}"
+  if [ "${final_attempt}" -gt "${attempts}" ]; then
+    final_attempt="${attempts}"
+  fi
+  echo "::error::Unable to resolve ${label} from ${source_url} after ${final_attempt} attempt(s)."
   return 1
 }
 
@@ -119,6 +133,10 @@ if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
     build_mode="nightly"
   else
     echo "workflow_dispatch build_mode=auto: using manual mode."
+    if [ "${publish_release}" = "true" ]; then
+      echo "::warning::workflow_dispatch with build_mode=auto resolves to manual mode; publish_release=true is normalized to false to avoid unintended release publishing."
+      publish_release="false"
+    fi
   fi
 fi
 
@@ -180,7 +198,15 @@ if [ "${build_mode}" = "nightly" ]; then
   fi
   echo "Nightly source resolved from ${nightly_branch}@${source_git_ref} (configured ASTRBOT_NIGHTLY_SOURCE_GIT_REF='${nightly_source_git_ref}')."
 elif [ "${build_mode}" = "tag-poll" ]; then
-  latest_tag="$(git ls-remote --tags --refs "${source_git_url}" \
+  tag_remote_output="$(
+    git_ls_remote_with_retry \
+      "${source_git_url}" \
+      "refs/tags/*" \
+      "upstream tags refs/tags/*" \
+      "${retry_attempts}" \
+      "${retry_sleep_seconds}"
+  )"
+  latest_tag="$(printf '%s\n' "${tag_remote_output}" \
     | awk '{print $2}' \
     | sed 's#refs/tags/##' \
     | sort -V \
@@ -211,6 +237,7 @@ if [ "${should_build}" = "true" ]; then
     echo "Resolved version directly from source tag: ${source_git_ref}"
   else
     workdir="$(mktemp -d)"
+    temp_dirs+=("${workdir}")
     repo_dir="${workdir}/AstrBot"
     git init "${repo_dir}"
     git -C "${repo_dir}" remote add origin "${source_git_url}"
