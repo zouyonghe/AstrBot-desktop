@@ -440,11 +440,29 @@ jobs:
           nightly_date_pattern = re.compile(r"-nightly\.[0-9]{8}\.[0-9a-fA-F]{7,40}")
           nightly_hash_pattern = re.compile(r"-nightly-[0-9a-fA-F]{7,40}")
 
+          def canonicalize_stem(stem: str, ext: str) -> str:
+              # RPMs are emitted as AstrBot-<ver>-<rel>.<arch>; normalize separators.
+              if ext == ".rpm":
+                  match = re.fullmatch(r"AstrBot-(\d+\.\d+\.\d+)-\d+\.(x86_64|aarch64)", stem)
+                  if match:
+                      version, arch = match.groups()
+                      return f"AstrBot_{version}_{arch}"
+
+              # Windows NSIS installers use "-setup"; normalize to "_setup".
+              if ext == ".exe":
+                  match = re.fullmatch(r"AstrBot_(\d+\.\d+\.\d+)_([A-Za-z0-9_]+)-setup", stem)
+                  if match:
+                      version, arch = match.groups()
+                      return f"AstrBot_{version}_{arch}_setup"
+
+              return stem
+
           for path in sorted(p for p in root.rglob("*") if p.is_file()):
               stem = path.stem
               ext = path.suffix
               normalized_stem = nightly_date_pattern.sub("", stem)
               normalized_stem = nightly_hash_pattern.sub("", normalized_stem)
+              normalized_stem = canonicalize_stem(normalized_stem, ext)
               if not normalized_stem.endswith(suffix):
                   normalized_stem = f"{normalized_stem}{suffix}"
               new_path = path.with_name(f"{normalized_stem}{ext}")
