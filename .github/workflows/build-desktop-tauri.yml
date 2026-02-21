@@ -226,21 +226,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo tauri build --verbose --target ${{ matrix.target }} --bundles app
+          max_attempts=3
+          attempt=1
+          until cargo tauri build --verbose --target ${{ matrix.target }} --bundles app; do
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "macOS build failed after ${max_attempts} attempts." >&2
+              exit 1
+            fi
+            echo "macOS build failed on attempt ${attempt}/${max_attempts}, retrying in 8s..."
+            attempt=$((attempt + 1))
+            sleep 8
+          done
 
       - name: Package macOS app as zip
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          app_files=(src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app)
-          if [ "${#app_files[@]}" -ne 1 ]; then
-            echo "Expected exactly one macOS .app bundle, found ${#app_files[@]}." >&2
-            ls -la src-tauri/target/${{ matrix.target }}/release/bundle/macos || true
+          app_path="src-tauri/target/${{ matrix.target }}/release/bundle/macos/AstrBot.app"
+          if [ ! -d "${app_path}" ]; then
+            echo "Expected app bundle not found: ${app_path}" >&2
+            ls -la "src-tauri/target/${{ matrix.target }}/release/bundle/macos" || true
             exit 1
           fi
 
-          app_path="${app_files[0]}"
           zip_dir="src-tauri/target/${{ matrix.target }}/release/bundle/zip"
           zip_path="${zip_dir}/AstrBot_${{ needs.resolve_build_context.outputs.astrbot_version }}_macos_${{ matrix.arch }}.zip"
           mkdir -p "${zip_dir}"
