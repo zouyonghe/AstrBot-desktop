@@ -17,7 +17,9 @@ on:
         type: boolean
         default: true
       build_mode:
-        description: Build mode (`tag-poll` | `nightly`): `nightly` (default) always builds latest upstream commit, `tag-poll` builds latest upstream tag (or `source_git_ref` override)
+        description: >-
+          Build mode (`tag-poll` | `nightly`): `nightly` (default) always builds latest upstream commit,
+          `tag-poll` builds latest upstream tag (or `source_git_ref` override)
         required: false
         type: choice
         default: nightly
