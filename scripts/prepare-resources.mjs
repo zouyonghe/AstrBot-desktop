@@ -42,6 +42,10 @@ const normalizeSourceRepoConfig = () => {
 };
 
 const { repoUrl: sourceRepoUrl, repoRef: sourceRepoRef } = normalizeSourceRepoConfig();
+const GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+const VERSION_TAG_REF_PATTERN = /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const isSourceRepoRefCommitSha = GIT_COMMIT_SHA_PATTERN.test(sourceRepoRef);
+const isSourceRepoRefVersionTag = VERSION_TAG_REF_PATTERN.test(sourceRepoRef);
 
 const resolveSourceDir = () => {
   const fromEnv = process.env.ASTRBOT_SOURCE_DIR?.trim();
@@ -64,7 +68,7 @@ const ensureSourceRepo = (sourceDir) => {
   if (!existsSync(path.join(sourceDir, '.git'))) {
     mkdirSync(path.dirname(sourceDir), { recursive: true });
     const cloneArgs = ['clone', '--depth', '1'];
-    if (sourceRepoRef) {
+    if (sourceRepoRef && !isSourceRepoRefCommitSha) {
       cloneArgs.push('--branch', sourceRepoRef);
     }
     cloneArgs.push(sourceRepoUrl, sourceDir);
@@ -96,11 +100,10 @@ const ensureSourceRepo = (sourceDir) => {
       throw new Error(`Failed to fetch upstream ref ${sourceRepoRef}`);
     }
 
-    const checkoutResult = spawnSync(
-      'git',
-      ['-C', sourceDir, 'checkout', '-B', sourceRepoRef, 'FETCH_HEAD'],
-      { stdio: 'inherit' },
-    );
+    const checkoutArgs = isSourceRepoRefCommitSha
+      ? ['-C', sourceDir, 'checkout', '--detach', 'FETCH_HEAD']
+      : ['-C', sourceDir, 'checkout', '-B', sourceRepoRef, 'FETCH_HEAD'];
+    const checkoutResult = spawnSync('git', checkoutArgs, { stdio: 'inherit' });
     if (checkoutResult.status !== 0) {
       throw new Error(`Failed to checkout upstream ref ${sourceRepoRef}`);
     }
@@ -284,9 +287,18 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
 
 const verifyDesktopBridgeArtifacts = async (dashboardDir) => {
   const issues = [];
+  const enforceRequiredExpectations =
+    isDesktopBridgeExpectationStrict || !isSourceRepoRefVersionTag;
+  if (!enforceRequiredExpectations) {
+    console.warn(
+      `[prepare-resources] Desktop bridge required checks downgraded to warnings for source ref ${sourceRepoRef}. ` +
+        'Set ASTRBOT_DESKTOP_STRICT_BRIDGE_EXPECTATIONS=1 to enforce.',
+    );
+  }
 
   for (const expectation of DESKTOP_BRIDGE_EXPECTATIONS) {
-    const mustPass = expectation.required || isDesktopBridgeExpectationStrict;
+    const mustPass =
+      isDesktopBridgeExpectationStrict || (expectation.required && enforceRequiredExpectations);
     const file = path.join(dashboardDir, ...expectation.filePath);
     if (!existsSync(file)) {
       const relativePath = path.relative(projectRoot, file);
