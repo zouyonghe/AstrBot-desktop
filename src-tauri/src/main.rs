@@ -35,6 +35,7 @@ const GRACEFUL_RESTART_REQUEST_TIMEOUT_MS: u64 = 2_500;
 const GRACEFUL_RESTART_START_TIME_TIMEOUT_MS: u64 = 1_800;
 const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
 const GRACEFUL_STOP_TIMEOUT_MS: u64 = 10_000;
+const BACKEND_READY_POLL_INTERVAL_MS: u64 = 300;
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
 #[cfg(target_os = "windows")]
 const WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS: u64 = 350;
@@ -523,10 +524,17 @@ impl BackendState {
     fn wait_for_backend(&self, plan: &LaunchPlan) -> Result<(), String> {
         let timeout_ms = resolve_backend_timeout_ms(plan.packaged_mode);
         let start_time = Instant::now();
+        let mut tcp_ready_logged = false;
 
         loop {
-            if self.ping_backend(backend_ping_timeout_ms()) {
+            if self.is_backend_http_ready(backend_ping_timeout_ms()) {
                 return Ok(());
+            }
+            if !tcp_ready_logged && self.ping_backend(backend_ping_timeout_ms()) {
+                append_desktop_log(
+                    "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
+                );
+                tcp_ready_logged = true;
             }
 
             {
@@ -561,8 +569,15 @@ impl BackendState {
                 }
             }
 
-            thread::sleep(Duration::from_millis(600));
+            thread::sleep(Duration::from_millis(BACKEND_READY_POLL_INTERVAL_MS));
         }
+    }
+
+    fn is_backend_http_ready(&self, timeout_ms: u64) -> bool {
+        matches!(
+            self.request_backend_status_code("GET", "/", timeout_ms, None, None),
+            Some(status_code) if (200..400).contains(&status_code)
+        )
     }
 
     fn ping_backend(&self, timeout_ms: u64) -> bool {
