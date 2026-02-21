@@ -464,3 +464,34 @@ jobs:
           make_latest: ${{ needs.resolve_build_context.outputs.release_prerelease != 'true' }}
           files: release-artifacts/**/*
           fail_on_unmatched_files: true
+
+      - name: Demote previous prerelease marker
+        if: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_prerelease_id="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              | jq -s -r --arg current_tag "${CURRENT_RELEASE_TAG}" '
+                  map(if type == "array" then . else [] end)
+                  | add
+                  | map(select(.prerelease == true and .draft == false and .tag_name != $current_tag))
+                  | sort_by(.published_at // .created_at)
+                  | reverse
+                  | .[0].id // empty
+                '
+          )"
+
+          if [ -z "${previous_prerelease_id}" ]; then
+            echo "No previous prerelease found to demote."
+            exit 0
+          fi
+
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${previous_prerelease_id}" \
+            -f prerelease=false \
+            -f make_latest=false >/dev/null
+          echo "Demoted previous prerelease release_id=${previous_prerelease_id}"
