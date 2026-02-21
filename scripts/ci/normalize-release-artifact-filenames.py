@@ -9,7 +9,14 @@ import sys
 
 NIGHTLY_DATE_PATTERN = re.compile(r"(?:-|_)nightly[._-][0-9]{8}[._-][0-9a-fA-F]{7,40}")
 NIGHTLY_HASH_PATTERN = re.compile(r"(?:-|_)nightly[-_][0-9a-fA-F]{7,40}")
-HEX_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{7,64}$")
+HEX_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{8,64}$")
+ARTIFACT_EXTENSIONS: set[str] = {
+    ".rpm",
+    ".deb",
+    ".exe",
+    ".msi",
+    ".zip",
+}
 
 ARCH_ALIAS = {
     "x86_64": "amd64",
@@ -25,7 +32,8 @@ def normalize_arch(arch: str) -> str:
 
 
 def should_normalize_file(path: pathlib.Path) -> bool:
-    if path.suffix not in {".rpm", ".deb", ".exe", ".msi", ".zip"}:
+    ext = path.suffix.lower()
+    if ext not in ARTIFACT_EXTENSIONS:
         return False
     return path.stem.startswith("AstrBot_") or path.stem.startswith("AstrBot-")
 
@@ -104,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source-git-ref",
         default="",
-        help="Source git ref used to derive nightly short SHA suffix.",
+        help="Source git ref used to derive nightly short SHA suffix (nightly requires hex SHA, 8-64 chars).",
     )
     parser.add_argument(
         "--strict-unmatched",
@@ -128,7 +136,7 @@ def main() -> int:
 
     if is_nightly and not HEX_SHA_PATTERN.fullmatch(source_git_ref):
         raise RuntimeError(
-            "nightly build requires --source-git-ref to be a hex commit SHA (7-64 chars)"
+            "nightly build requires --source-git-ref to be a hex commit SHA (8-64 chars)"
         )
 
     unmatched_messages: list[str] = []
@@ -141,7 +149,7 @@ def main() -> int:
             continue
 
         stem = path.stem
-        ext = path.suffix
+        ext = path.suffix.lower()
 
         normalized_stem = NIGHTLY_DATE_PATTERN.sub("", stem)
         normalized_stem = NIGHTLY_HASH_PATTERN.sub("", normalized_stem)
