@@ -150,6 +150,8 @@ brew install uv
 
 ```bash
 node -v
+# Debian/Ubuntu 某些环境可执行名可能是 nodejs
+nodejs -v
 npm -v
 npx -v
 uvx --version

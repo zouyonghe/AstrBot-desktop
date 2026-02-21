@@ -36,7 +36,8 @@ const GRACEFUL_RESTART_START_TIME_TIMEOUT_MS: u64 = 1_800;
 const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
 const GRACEFUL_STOP_TIMEOUT_MS: u64 = 10_000;
 const BACKEND_READY_POLL_INTERVAL_MS: u64 = 300;
-const BACKEND_READY_HTTP_PATH: &str = "/";
+const DEFAULT_BACKEND_READY_HTTP_PATH: &str = "/";
+const BACKEND_READY_HTTP_PATH_ENV: &str = "ASTRBOT_BACKEND_READY_HTTP_PATH";
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
 #[cfg(target_os = "windows")]
 const WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS: u64 = 350;
@@ -72,6 +73,7 @@ static BRIDGE_BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
 static BACKEND_PATH_OVERRIDE: OnceLock<Option<OsString>> = OnceLock::new();
+static BACKEND_READY_HTTP_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -150,6 +152,13 @@ enum GracefulRestartOutcome {
     Completed,
     WaitFailed(String),
     RequestRejected,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum BackendReadiness {
+    NotReachable,
+    TcpOnly,
+    HttpReady,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -525,17 +534,19 @@ impl BackendState {
     fn wait_for_backend(&self, plan: &LaunchPlan) -> Result<(), String> {
         let timeout_ms = resolve_backend_timeout_ms(plan.packaged_mode);
         let start_time = Instant::now();
+        let ready_http_path = backend_ready_http_path();
         let mut tcp_ready_logged = false;
 
         loop {
-            if self.is_backend_http_ready(backend_ping_timeout_ms()) {
-                return Ok(());
-            }
-            if !tcp_ready_logged && self.ping_backend(backend_ping_timeout_ms()) {
-                append_desktop_log(
-                    "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
-                );
-                tcp_ready_logged = true;
+            match self.backend_readiness(backend_ping_timeout_ms(), ready_http_path) {
+                BackendReadiness::HttpReady => return Ok(()),
+                BackendReadiness::TcpOnly if !tcp_ready_logged => {
+                    append_desktop_log(
+                        "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
+                    );
+                    tcp_ready_logged = true;
+                }
+                _ => {}
             }
 
             {
@@ -566,7 +577,7 @@ impl BackendState {
                     append_desktop_log(&format!(
                         "backend HTTP readiness check timed out after {}ms: path={}, tcp_reachable={}",
                         limit.as_millis(),
-                        BACKEND_READY_HTTP_PATH,
+                        ready_http_path,
                         tcp_ready_logged
                     ));
                     return Err(format!(
@@ -580,9 +591,19 @@ impl BackendState {
         }
     }
 
-    fn is_backend_http_ready(&self, timeout_ms: u64) -> bool {
+    fn backend_readiness(&self, timeout_ms: u64, ready_http_path: &str) -> BackendReadiness {
+        if self.is_backend_http_ready(timeout_ms, ready_http_path) {
+            BackendReadiness::HttpReady
+        } else if self.ping_backend(timeout_ms) {
+            BackendReadiness::TcpOnly
+        } else {
+            BackendReadiness::NotReachable
+        }
+    }
+
+    fn is_backend_http_ready(&self, timeout_ms: u64, ready_http_path: &str) -> bool {
         matches!(
-            self.request_backend_status_code("GET", BACKEND_READY_HTTP_PATH, timeout_ms, None, None),
+            self.request_backend_status_code("GET", ready_http_path, timeout_ms, None, None),
             Some(status_code) if (200..400).contains(&status_code)
         )
     }
@@ -2276,6 +2297,24 @@ fn normalize_backend_url(raw: &str) -> String {
     }
 }
 
+fn backend_ready_http_path() -> &'static str {
+    BACKEND_READY_HTTP_PATH
+        .get_or_init(|| match env::var(BACKEND_READY_HTTP_PATH_ENV) {
+            Ok(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    DEFAULT_BACKEND_READY_HTTP_PATH.to_string()
+                } else if trimmed.starts_with('/') {
+                    trimmed.to_string()
+                } else {
+                    format!("/{trimmed}")
+                }
+            }
+            Err(_) => DEFAULT_BACKEND_READY_HTTP_PATH.to_string(),
+        })
+        .as_str()
+}
+
 fn workspace_root_dir() -> PathBuf {
     let candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -2315,14 +2354,8 @@ fn path_key(path: &Path) -> Option<OsString> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    #[cfg(target_os = "windows")]
-    {
-        Some(OsString::from(path.to_string_lossy().to_ascii_lowercase()))
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Some(path.as_os_str().to_os_string())
-    }
+    let normalized_path: PathBuf = path.components().collect();
+    Some(normalized_path.into_os_string())
 }
 
 fn add_path_candidate(
