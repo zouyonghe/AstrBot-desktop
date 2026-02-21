@@ -2576,17 +2576,19 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
     let graceful_wait_timeout = match &graceful_status {
         Ok(status) if status.success() => timeout,
         Ok(status) => {
-            let shortened_wait = Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS);
+            let shortened_wait =
+                timeout.min(Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS));
             append_desktop_log(&format!(
-                "taskkill graceful stop returned non-zero; skip long graceful wait: pid={pid}, status={status:?}, shortened_wait_ms={}",
+                "taskkill graceful stop returned non-zero; skip long graceful wait: pid={pid}, status={status:?}, effective_wait_ms={}",
                 shortened_wait.as_millis()
             ));
             shortened_wait
         }
         Err(error) => {
-            let shortened_wait = Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS);
+            let shortened_wait =
+                timeout.min(Duration::from_millis(WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS));
             append_desktop_log(&format!(
-                "taskkill graceful stop failed to start; skip long graceful wait: pid={pid}, error={error}, shortened_wait_ms={}",
+                "taskkill graceful stop failed to start; skip long graceful wait: pid={pid}, error={error}, effective_wait_ms={}",
                 shortened_wait.as_millis()
             ));
             shortened_wait
