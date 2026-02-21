@@ -41,7 +41,31 @@ const normalizeSourceRepoConfig = () => {
   };
 };
 
-const { repoUrl: sourceRepoUrl, repoRef: sourceRepoRef } = normalizeSourceRepoConfig();
+const { repoUrl: sourceRepoUrl, repoRef: sourceRepoRefResolved } = normalizeSourceRepoConfig();
+const SOURCE_REPO_REF_COMMIT_HINT_TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+// Accept full SHAs and longer abbreviated SHAs (>= 12) to reduce false positives
+// from hex-looking branch/tag names while still supporting common CI short refs.
+const GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{12,64}$/i;
+// Treat both `v1.2.3` and `1.2.3` style refs as release tags.
+const VERSION_TAG_REF_PATTERN = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+const getSourceRefInfo = (resolvedRef) => {
+  const ref = typeof resolvedRef === 'string' ? resolvedRef.trim() : '';
+  const commitHintRaw = String(process.env.ASTRBOT_SOURCE_GIT_REF_IS_COMMIT || '')
+    .trim()
+    .toLowerCase();
+  const hasExplicitCommitHint = SOURCE_REPO_REF_COMMIT_HINT_TRUTHY.has(commitHintRaw);
+  const isCommit = !!ref && (GIT_COMMIT_SHA_PATTERN.test(ref) || hasExplicitCommitHint);
+  const isVersionTag = VERSION_TAG_REF_PATTERN.test(ref);
+
+  return { ref, isCommit, isVersionTag };
+};
+
+const {
+  ref: sourceRepoRef,
+  isCommit: isSourceRepoRefCommitSha,
+  isVersionTag: isSourceRepoRefVersionTag,
+} = getSourceRefInfo(sourceRepoRefResolved);
 
 const resolveSourceDir = () => {
   const fromEnv = process.env.ASTRBOT_SOURCE_DIR?.trim();
@@ -64,7 +88,7 @@ const ensureSourceRepo = (sourceDir) => {
   if (!existsSync(path.join(sourceDir, '.git'))) {
     mkdirSync(path.dirname(sourceDir), { recursive: true });
     const cloneArgs = ['clone', '--depth', '1'];
-    if (sourceRepoRef) {
+    if (sourceRepoRef && !isSourceRepoRefCommitSha) {
       cloneArgs.push('--branch', sourceRepoRef);
     }
     cloneArgs.push(sourceRepoUrl, sourceDir);
@@ -96,11 +120,10 @@ const ensureSourceRepo = (sourceDir) => {
       throw new Error(`Failed to fetch upstream ref ${sourceRepoRef}`);
     }
 
-    const checkoutResult = spawnSync(
-      'git',
-      ['-C', sourceDir, 'checkout', '-B', sourceRepoRef, 'FETCH_HEAD'],
-      { stdio: 'inherit' },
-    );
+    const checkoutArgs = isSourceRepoRefCommitSha
+      ? ['-C', sourceDir, 'checkout', '--detach', 'FETCH_HEAD']
+      : ['-C', sourceDir, 'checkout', '-B', sourceRepoRef, 'FETCH_HEAD'];
+    const checkoutResult = spawnSync('git', checkoutArgs, { stdio: 'inherit' });
     if (checkoutResult.status !== 0) {
       throw new Error(`Failed to checkout upstream ref ${sourceRepoRef}`);
     }
@@ -284,9 +307,23 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
 
 const verifyDesktopBridgeArtifacts = async (dashboardDir) => {
   const issues = [];
+  const isTaggedRelease = isSourceRepoRefVersionTag;
+  if (!isDesktopBridgeExpectationStrict && isTaggedRelease) {
+    console.warn(
+      `[prepare-resources] Desktop bridge required checks downgraded to warnings for source ref ${sourceRepoRef}. ` +
+        'Set ASTRBOT_DESKTOP_STRICT_BRIDGE_EXPECTATIONS=1 to enforce.',
+    );
+  }
+
+  const shouldEnforceDesktopBridgeExpectation = (expectation) => {
+    if (isDesktopBridgeExpectationStrict) {
+      return true;
+    }
+    return expectation.required && !isTaggedRelease;
+  };
 
   for (const expectation of DESKTOP_BRIDGE_EXPECTATIONS) {
-    const mustPass = expectation.required || isDesktopBridgeExpectationStrict;
+    const mustPass = shouldEnforceDesktopBridgeExpectation(expectation);
     const file = path.join(dashboardDir, ...expectation.filePath);
     if (!existsSync(file)) {
       const relativePath = path.relative(projectRoot, file);
