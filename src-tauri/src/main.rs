@@ -2499,25 +2499,66 @@ fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
     }
 }
 
-fn run_stop_command(pid: u32, label: &str, program: &str, args: &[&str]) -> io::Result<ExitStatus> {
-    let status = Command::new(program)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .status();
+fn summarize_command_output(output: &[u8]) -> String {
+    let collapsed = String::from_utf8_lossy(output)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.is_empty() {
+        return "<empty>".to_string();
+    }
+    const MAX_LEN: usize = 320;
+    let count = collapsed.chars().count();
+    if count <= MAX_LEN {
+        return collapsed;
+    }
+    let truncated: String = collapsed.chars().take(MAX_LEN).collect();
+    format!("{truncated}...<truncated>")
+}
 
-    match &status {
-        Ok(exit_status) if exit_status.success() => {}
-        Ok(exit_status) => append_desktop_log(&format!(
-            "{label} returned non-zero: pid={pid}, status={exit_status:?}"
+#[cfg(target_os = "windows")]
+fn log_child_poll_state(child: &mut Child, label: &str, pid: u32) {
+    match child.try_wait() {
+        Ok(Some(status)) => append_desktop_log(&format!(
+            "{label}: child already exited: pid={pid}, status={status}"
+        )),
+        Ok(None) => append_desktop_log(&format!("{label}: child still running: pid={pid}")),
+        Err(error) => append_desktop_log(&format!(
+            "{label}: failed to poll child status: pid={pid}, error={error}"
+        )),
+    }
+}
+
+fn run_stop_command(pid: u32, label: &str, program: &str, args: &[&str]) -> io::Result<ExitStatus> {
+    append_desktop_log(&format!(
+        "{label} start: pid={pid}, command={} {}",
+        program,
+        args.join(" ")
+    ));
+    let output = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .output();
+
+    match &output {
+        Ok(result) if result.status.success() => append_desktop_log(&format!(
+            "{label} succeeded: pid={pid}, status={:?}, stdout={}, stderr={}",
+            result.status,
+            summarize_command_output(&result.stdout),
+            summarize_command_output(&result.stderr)
+        )),
+        Ok(result) => append_desktop_log(&format!(
+            "{label} returned non-zero: pid={pid}, status={:?}, stdout={}, stderr={}",
+            result.status,
+            summarize_command_output(&result.stdout),
+            summarize_command_output(&result.stderr)
         )),
         Err(error) => append_desktop_log(&format!(
             "{label} failed to start: pid={pid}, error={error}"
         )),
     }
 
-    status
+    output.map(|result| result.status)
 }
 
 fn compute_followup_wait(timeout: Duration, max_extra_wait: Duration) -> Duration {
@@ -2541,23 +2582,36 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
     let pid = child.id();
     let pid_arg = pid.to_string();
 
+    log_child_poll_state(child, "before taskkill graceful stop", pid);
     let graceful_status = run_stop_command(
         pid,
         "taskkill graceful stop",
         "taskkill",
         &["/pid", &pid_arg, "/t"],
     );
+    log_child_poll_state(child, "after taskkill graceful stop", pid);
 
+    let graceful_wait_start = Instant::now();
     if wait_for_child_exit(child, timeout) {
+        append_desktop_log(&format!(
+            "child exited during graceful wait: pid={pid}, elapsed_ms={}",
+            graceful_wait_start.elapsed().as_millis()
+        ));
         return true;
     }
+    append_desktop_log(&format!(
+        "child still running after graceful wait timeout: pid={pid}, timeout_ms={}",
+        timeout.as_millis()
+    ));
 
+    log_child_poll_state(child, "before taskkill force stop", pid);
     let force_status = run_stop_command(
         pid,
         "taskkill force stop",
         "taskkill",
         &["/pid", &pid_arg, "/t", "/f"],
     );
+    log_child_poll_state(child, "after taskkill force stop", pid);
 
     let followup_wait = compute_followup_wait(
         timeout,
@@ -2567,7 +2621,12 @@ fn stop_child_process_gracefully(child: &mut Child, timeout: Duration) -> bool {
         "child graceful stop timed out, force-kill issued: pid={pid}, graceful={graceful_status:?}, force={force_status:?}, followup_wait_ms={}",
         followup_wait.as_millis(),
     ));
-    wait_for_child_exit(child, followup_wait)
+    let exited = wait_for_child_exit(child, followup_wait);
+    append_desktop_log(&format!(
+        "child force-stop followup wait finished: pid={pid}, exited={exited}, elapsed_ms={}",
+        followup_wait.as_millis()
+    ));
+    exited
 }
 
 #[cfg(not(target_os = "windows"))]
