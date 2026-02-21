@@ -111,6 +111,7 @@ struct BackendState {
     is_spawning: AtomicBool,
     is_restarting: AtomicBool,
     exit_cleanup_started: AtomicBool,
+    allow_next_exit_request: AtomicBool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -179,6 +180,7 @@ impl Default for BackendState {
             is_spawning: AtomicBool::new(false),
             is_restarting: AtomicBool::new(false),
             exit_cleanup_started: AtomicBool::new(false),
+            allow_next_exit_request: AtomicBool::new(false),
         }
     }
 }
@@ -1064,6 +1066,14 @@ Content-Length: {}\r\n\
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
+
+    fn allow_next_exit_request(&self) {
+        self.allow_next_exit_request.store(true, Ordering::Release);
+    }
+
+    fn take_exit_request_allowance(&self) -> bool {
+        self.allow_next_exit_request.swap(false, Ordering::AcqRel)
+    }
 }
 
 #[tauri::command]
@@ -1249,6 +1259,12 @@ fn main() {
         .run(|app_handle, event| match event {
             RunEvent::ExitRequested { api, .. } => {
                 let state = app_handle.state::<BackendState>();
+                if state.take_exit_request_allowance() {
+                    append_desktop_log(
+                        "exit request allowed to pass through after backend cleanup",
+                    );
+                    return;
+                }
                 // Prevent immediate process exit so backend shutdown can run in the runtime's
                 // blocking pool; we exit explicitly after stop_backend() finishes.
                 api.prevent_exit();
@@ -1269,6 +1285,7 @@ fn main() {
                     }
 
                     append_desktop_log("backend stop finished, exiting desktop process");
+                    state.allow_next_exit_request();
                     app_handle_cloned.exit(0);
                 });
             }
