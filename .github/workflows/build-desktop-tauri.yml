@@ -425,105 +425,19 @@ jobs:
         env:
           BUILD_MODE: ${{ needs.resolve_build_context.outputs.build_mode }}
           SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_STRICT_ARTIFACT_FILENAME_NORMALIZATION: ${{ vars.ASTRBOT_STRICT_ARTIFACT_FILENAME_NORMALIZATION || '0' }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          import os
-          import pathlib
-          import re
-
-          build_mode = os.environ.get("BUILD_MODE", "").strip().lower()
-          source_git_ref = os.environ.get("SOURCE_GIT_REF", "").strip()
-          is_nightly = build_mode == "nightly"
-          short_sha = source_git_ref[:8]
-          nightly_suffix = f"_nightly_{short_sha}" if is_nightly else ""
-          if is_nightly and len(short_sha) < 7:
-              raise RuntimeError(
-                  "nightly build requires SOURCE_GIT_REF commit-like value to derive short sha suffix"
-              )
-
-          root = pathlib.Path("release-artifacts")
-          nightly_date_pattern = re.compile(r"(?:-|_)nightly[._-][0-9]{8}[._-][0-9a-fA-F]{7,40}")
-          nightly_hash_pattern = re.compile(r"(?:-|_)nightly[-_][0-9a-fA-F]{7,40}")
-          arch_alias = {
-              "x86_64": "amd64",
-              "x64": "amd64",
-              "amd64": "amd64",
-              "aarch64": "arm64",
-              "arm64": "arm64",
-          }
-
-          def normalize_arch(arch: str) -> str:
-              return arch_alias.get(arch, arch)
-
-          def canonicalize_stem(stem: str, ext: str) -> str:
-              # RPM: AstrBot-<ver>-<rel>.<arch> or AstrBot_<ver>_<arch>
-              if ext == ".rpm":
-                  match = re.fullmatch(r"AstrBot-([0-9A-Za-z.+-]+)-\d+\.(x86_64|aarch64|amd64|arm64)", stem)
-                  if match:
-                      version, arch = match.groups()
-                      return f"AstrBot_{version}_{normalize_arch(arch)}"
-                  match = re.fullmatch(r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)", stem)
-                  if match:
-                      version, arch = match.groups()
-                      return f"AstrBot_{version}_{normalize_arch(arch)}"
-
-              # DEB: AstrBot_<ver>_<arch>
-              if ext == ".deb":
-                  match = re.fullmatch(r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)", stem)
-                  if match:
-                      version, arch = match.groups()
-                      return f"AstrBot_{version}_{normalize_arch(arch)}"
-
-              # EXE: AstrBot_<ver>_<arch>-setup or _setup
-              if ext == ".exe":
-                  match = re.fullmatch(
-                      r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)(?:-setup|_setup)",
-                      stem,
-                  )
-                  if match:
-                      version, arch = match.groups()
-                      return f"AstrBot_{version}_{normalize_arch(arch)}_setup"
-
-              # MSI: AstrBot_<ver>_<arch>_<locale>
-              if ext == ".msi":
-                  match = re.fullmatch(
-                      r"AstrBot_([0-9A-Za-z.+-]+)_(x86_64|aarch64|x64|amd64|arm64)_([A-Za-z0-9-]+)",
-                      stem,
-                  )
-                  if match:
-                      version, arch, locale = match.groups()
-                      return f"AstrBot_{version}_{normalize_arch(arch)}_{locale}"
-
-              # macOS zip: AstrBot_<ver>_macos_<arch>
-              if ext == ".zip":
-                  match = re.fullmatch(
-                      r"AstrBot_([0-9A-Za-z.+-]+)_macos_(x86_64|aarch64|x64|amd64|arm64)",
-                      stem,
-                  )
-                  if match:
-                      version, arch = match.groups()
-                      return f"AstrBot_{version}_macos_{normalize_arch(arch)}"
-
-              return stem
-
-          for path in sorted(p for p in root.rglob("*") if p.is_file()):
-              stem = path.stem
-              ext = path.suffix
-              normalized_stem = nightly_date_pattern.sub("", stem)
-              normalized_stem = nightly_hash_pattern.sub("", normalized_stem)
-              normalized_stem = canonicalize_stem(normalized_stem, ext)
-              if nightly_suffix and not normalized_stem.endswith(nightly_suffix):
-                  normalized_stem = f"{normalized_stem}{nightly_suffix}"
-              new_path = path.with_name(f"{normalized_stem}{ext}")
-              if new_path == path:
-                  continue
-              if new_path.exists():
-                  raise RuntimeError(f"target already exists: {new_path}")
-              path.rename(new_path)
-              print(f"renamed: {path.name} -> {new_path.name}")
-          PY
+          normalize_args=(
+            --root release-artifacts
+            --build-mode "${BUILD_MODE}"
+            --source-git-ref "${SOURCE_GIT_REF}"
+          )
+          if [ "${ASTRBOT_STRICT_ARTIFACT_FILENAME_NORMALIZATION}" = "1" ]; then
+            normalize_args+=(--strict-unmatched)
+          fi
+          python3 scripts/ci/normalize-release-artifact-filenames.py "${normalize_args[@]}"
 
       - name: Validate artifact filename uniqueness
         shell: bash

@@ -85,6 +85,10 @@ source_git_url="${ASTRBOT_SOURCE_GIT_URL}"
 source_git_ref="${ASTRBOT_SOURCE_GIT_REF}"
 nightly_source_git_ref="${ASTRBOT_NIGHTLY_SOURCE_GIT_REF:-master}"
 nightly_utc_hour="${ASTRBOT_NIGHTLY_UTC_HOUR:-${DEFAULT_NIGHTLY_UTC_HOUR}}"
+# When WORKFLOW_BUILD_MODE is unset, we intentionally default to different modes
+# based on the triggering event:
+# - "nightly" for workflow_dispatch events (manual nightly intent)
+# - "auto" for other events, normalized later by event-specific routing logic
 workflow_build_mode_raw="${WORKFLOW_BUILD_MODE:-}"
 if [ -z "${workflow_build_mode_raw}" ]; then
   if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
@@ -208,7 +212,7 @@ retry_sleep_seconds="$(
 
 if [ "${build_mode}" = "nightly" ]; then
   if [ "${workflow_source_git_ref_provided}" = "true" ]; then
-    echo "::warning::workflow_dispatch nightly mode ignores source_git_ref='${WORKFLOW_SOURCE_GIT_REF:-}'. Using latest commit from configured nightly branch."
+    echo "::warning::${GITHUB_EVENT_NAME} nightly mode ignores source_git_ref='${WORKFLOW_SOURCE_GIT_REF:-}'. Using latest commit from configured nightly branch."
   fi
   nightly_branch="${nightly_source_git_ref}"
   if [ -z "${nightly_branch}" ]; then
