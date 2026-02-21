@@ -68,6 +68,7 @@ static BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static BRIDGE_BACKEND_PING_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
+static BACKEND_PATH_AUGMENT_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -425,6 +426,24 @@ impl BackendState {
                 "PYTHONIOENCODING",
                 env::var("PYTHONIOENCODING").unwrap_or_else(|_| "utf-8".to_string()),
             );
+        if let Some((augmented_path, prepend_entries)) = build_backend_augmented_path() {
+            command.env("PATH", augmented_path);
+            if !prepend_entries.is_empty()
+                && BACKEND_PATH_AUGMENT_LOGGED
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                let preview = prepend_entries
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                append_desktop_log(&format!(
+                    "backend PATH augmented with {} prepended directories: {preview}",
+                    prepend_entries.len()
+                ));
+            }
+        }
         #[cfg(target_os = "windows")]
         {
             // Keep packaged backend fully backgrounded; keep console visible for local/dev debugging.
@@ -2282,6 +2301,113 @@ fn detect_astrbot_source_root() -> Option<PathBuf> {
 
 fn default_packaged_root_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".astrbot"))
+}
+
+fn push_path_candidate(target: &mut Vec<PathBuf>, existing: &[PathBuf], candidate: PathBuf) {
+    if candidate.as_os_str().is_empty() || !candidate.exists() {
+        return;
+    }
+    if target.iter().any(|path| path == &candidate)
+        || existing.iter().any(|path| path == &candidate)
+    {
+        return;
+    }
+    target.push(candidate);
+}
+
+fn build_backend_augmented_path() -> Option<(OsString, Vec<PathBuf>)> {
+    let existing_path = env::var_os("PATH").unwrap_or_default();
+    let existing_entries: Vec<PathBuf> = env::split_paths(&existing_path).collect();
+
+    let mut prepend_entries: Vec<PathBuf> = Vec::new();
+    if let Some(extra_path_raw) = env::var_os("ASTRBOT_DESKTOP_EXTRA_PATH") {
+        for path in env::split_paths(&extra_path_raw) {
+            push_path_candidate(&mut prepend_entries, &existing_entries, path);
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        push_path_candidate(
+            &mut prepend_entries,
+            &existing_entries,
+            home.join(".local").join("bin"),
+        );
+        #[cfg(target_os = "macos")]
+        {
+            push_path_candidate(
+                &mut prepend_entries,
+                &existing_entries,
+                home.join(".nvm").join("current").join("bin"),
+            );
+        }
+    }
+
+    if let Ok(nvm_bin) = env::var("NVM_BIN") {
+        push_path_candidate(
+            &mut prepend_entries,
+            &existing_entries,
+            PathBuf::from(nvm_bin),
+        );
+    }
+    if let Ok(volta_home) = env::var("VOLTA_HOME") {
+        push_path_candidate(
+            &mut prepend_entries,
+            &existing_entries,
+            PathBuf::from(volta_home).join("bin"),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for raw in [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+        ] {
+            push_path_candidate(&mut prepend_entries, &existing_entries, PathBuf::from(raw));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(app_data) = env::var("APPDATA") {
+            push_path_candidate(
+                &mut prepend_entries,
+                &existing_entries,
+                PathBuf::from(app_data).join("npm"),
+            );
+        }
+        if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+            push_path_candidate(
+                &mut prepend_entries,
+                &existing_entries,
+                PathBuf::from(&local_app_data)
+                    .join("Programs")
+                    .join("nodejs"),
+            );
+            push_path_candidate(
+                &mut prepend_entries,
+                &existing_entries,
+                PathBuf::from(local_app_data).join("nvm"),
+            );
+        }
+    }
+
+    if prepend_entries.is_empty() {
+        return None;
+    }
+
+    let mut merged_entries = prepend_entries.clone();
+    merged_entries.extend(existing_entries);
+
+    match env::join_paths(merged_entries) {
+        Ok(path) => Some((path, prepend_entries)),
+        Err(error) => {
+            append_desktop_log(&format!("failed to build augmented backend PATH: {error}"));
+            None
+        }
+    }
 }
 
 fn packaged_fallback_webui_probe_dir(root_dir: Option<&Path>) -> Option<PathBuf> {
