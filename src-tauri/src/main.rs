@@ -35,9 +35,11 @@ const GRACEFUL_RESTART_REQUEST_TIMEOUT_MS: u64 = 2_500;
 const GRACEFUL_RESTART_START_TIME_TIMEOUT_MS: u64 = 1_800;
 const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
 const GRACEFUL_STOP_TIMEOUT_MS: u64 = 10_000;
-const BACKEND_READY_POLL_INTERVAL_MS: u64 = 300;
+const DEFAULT_BACKEND_READY_POLL_INTERVAL_MS: u64 = 300;
+const BACKEND_READY_POLL_INTERVAL_ENV: &str = "ASTRBOT_BACKEND_READY_POLL_INTERVAL_MS";
 const DEFAULT_BACKEND_READY_HTTP_PATH: &str = "/";
 const BACKEND_READY_HTTP_PATH_ENV: &str = "ASTRBOT_BACKEND_READY_HTTP_PATH";
+const BACKEND_READY_PROBE_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_READY_PROBE_TIMEOUT_MS";
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
 #[cfg(target_os = "windows")]
 const WINDOWS_GRACEFUL_STOP_NONZERO_WAIT_MS: u64 = 350;
@@ -74,6 +76,8 @@ static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TRAY_RESTART_SIGNAL_TOKEN: AtomicU64 = AtomicU64::new(0);
 static BACKEND_PATH_OVERRIDE: OnceLock<Option<OsString>> = OnceLock::new();
 static BACKEND_READY_HTTP_PATH: OnceLock<String> = OnceLock::new();
+static BACKEND_READY_POLL_INTERVAL_MS: OnceLock<u64> = OnceLock::new();
+static BACKEND_READY_PROBE_TIMEOUT_MS: OnceLock<u64> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct ShellTexts {
@@ -528,7 +532,8 @@ impl BackendState {
         // This uses blocking polling intentionally and is called from spawn_blocking
         // startup/restart workers, not directly on the UI thread.
         let timeout_ms = resolve_backend_timeout_ms(plan.packaged_mode);
-        let probe_timeout_ms = backend_ping_timeout_ms();
+        let probe_timeout_ms = backend_ready_probe_timeout_ms();
+        let poll_interval_ms = backend_ready_poll_interval_ms();
         let start_time = Instant::now();
         let ready_http_path = backend_ready_http_path();
         let mut tcp_ready_logged = false;
@@ -545,7 +550,7 @@ impl BackendState {
                 return Ok(());
             }
 
-            if self.ping_backend(probe_timeout_ms) && !tcp_ready_logged {
+            if !tcp_ready_logged && self.ping_backend(probe_timeout_ms) {
                 append_desktop_log(
                     "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
                 );
@@ -581,9 +586,11 @@ impl BackendState {
                         .map(|status| status.to_string())
                         .unwrap_or_else(|| "none".to_string());
                     append_desktop_log(&format!(
-                        "backend HTTP readiness check timed out after {}ms: path={}, tcp_reachable={}, last_http_status={}",
+                        "backend HTTP readiness check timed out after {}ms: backend_url={}, path={}, probe_timeout_ms={}, tcp_reachable={}, last_http_status={}",
                         limit.as_millis(),
+                        self.backend_url,
                         ready_http_path,
+                        probe_timeout_ms,
                         tcp_ready_logged,
                         last_http_status_text
                     ));
@@ -594,7 +601,7 @@ impl BackendState {
                 }
             }
 
-            thread::sleep(Duration::from_millis(BACKEND_READY_POLL_INTERVAL_MS));
+            thread::sleep(Duration::from_millis(poll_interval_ms));
         }
     }
 
@@ -2918,6 +2925,26 @@ fn backend_ping_timeout_ms() -> u64 {
             DEFAULT_BACKEND_PING_TIMEOUT_MS,
         ),
         Err(_) => DEFAULT_BACKEND_PING_TIMEOUT_MS,
+    })
+}
+
+fn backend_ready_probe_timeout_ms() -> u64 {
+    *BACKEND_READY_PROBE_TIMEOUT_MS.get_or_init(|| {
+        let fallback = backend_ping_timeout_ms();
+        match env::var(BACKEND_READY_PROBE_TIMEOUT_ENV) {
+            Ok(raw) => parse_ping_timeout_env(&raw, BACKEND_READY_PROBE_TIMEOUT_ENV, fallback),
+            Err(_) => fallback,
+        }
+    })
+}
+
+fn backend_ready_poll_interval_ms() -> u64 {
+    *BACKEND_READY_POLL_INTERVAL_MS.get_or_init(|| {
+        let fallback = DEFAULT_BACKEND_READY_POLL_INTERVAL_MS;
+        match env::var(BACKEND_READY_POLL_INTERVAL_ENV) {
+            Ok(raw) => parse_ping_timeout_env(&raw, BACKEND_READY_POLL_INTERVAL_ENV, fallback),
+            Err(_) => fallback,
+        }
     })
 }
 
