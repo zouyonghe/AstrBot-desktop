@@ -173,6 +173,31 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Sync desktop version for this build
+        env:
+          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+        run: pnpm run sync:version
+
+      - name: Verify synced desktop version files
+        env:
+          EXPECTED_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${EXPECTED_DESKTOP_VERSION#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          tauri_version="$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")"
+          cargo_version="$(node -e "const fs=require('fs');const content=fs.readFileSync('src-tauri/Cargo.toml','utf8');const match=content.match(/\\[package\\][\\s\\S]*?\\nversion\\s*=\\s*\\\"([^\\\"]+)\\\"/m);console.log(match?match[1]:'');")"
+          if [ -z "${cargo_version}" ]; then
+            echo "Failed to resolve package.version from src-tauri/Cargo.toml" >&2
+            exit 1
+          fi
+          if [ "${pkg_version}" != "${expected}" ] || [ "${tauri_version}" != "${expected}" ] || [ "${cargo_version}" != "${expected}" ]; then
+            echo "Version sync mismatch: expected=${expected}, package.json=${pkg_version}, tauri.conf.json=${tauri_version}, Cargo.toml=${cargo_version}" >&2
+            exit 1
+          fi
+          echo "Version sync verified: ${expected}"
+
       - name: Build desktop installers (Linux)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
@@ -215,6 +240,31 @@ jobs:
 
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
+
+      - name: Sync desktop version for this build
+        env:
+          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+        run: pnpm run sync:version
+
+      - name: Verify synced desktop version files
+        env:
+          EXPECTED_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${EXPECTED_DESKTOP_VERSION#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          tauri_version="$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")"
+          cargo_version="$(node -e "const fs=require('fs');const content=fs.readFileSync('src-tauri/Cargo.toml','utf8');const match=content.match(/\\[package\\][\\s\\S]*?\\nversion\\s*=\\s*\\\"([^\\\"]+)\\\"/m);console.log(match?match[1]:'');")"
+          if [ -z "${cargo_version}" ]; then
+            echo "Failed to resolve package.version from src-tauri/Cargo.toml" >&2
+            exit 1
+          fi
+          if [ "${pkg_version}" != "${expected}" ] || [ "${tauri_version}" != "${expected}" ] || [ "${cargo_version}" != "${expected}" ]; then
+            echo "Version sync mismatch: expected=${expected}, package.json=${pkg_version}, tauri.conf.json=${tauri_version}, Cargo.toml=${cargo_version}" >&2
+            exit 1
+          fi
+          echo "Version sync verified: ${expected}"
 
       - name: Resolve macOS app bundle name
         id: resolve_macos_app_bundle
@@ -372,6 +422,31 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Sync desktop version for this build
+        env:
+          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+        run: pnpm run sync:version
+
+      - name: Verify synced desktop version files
+        env:
+          EXPECTED_DESKTOP_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${EXPECTED_DESKTOP_VERSION#v}"
+          pkg_version="$(node -e "console.log(require('./package.json').version)")"
+          tauri_version="$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")"
+          cargo_version="$(node -e "const fs=require('fs');const content=fs.readFileSync('src-tauri/Cargo.toml','utf8');const match=content.match(/\\[package\\][\\s\\S]*?\\nversion\\s*=\\s*\\\"([^\\\"]+)\\\"/m);console.log(match?match[1]:'');")"
+          if [ -z "${cargo_version}" ]; then
+            echo "Failed to resolve package.version from src-tauri/Cargo.toml" >&2
+            exit 1
+          fi
+          if [ "${pkg_version}" != "${expected}" ] || [ "${tauri_version}" != "${expected}" ] || [ "${cargo_version}" != "${expected}" ]; then
+            echo "Version sync mismatch: expected=${expected}, package.json=${pkg_version}, tauri.conf.json=${tauri_version}, Cargo.toml=${cargo_version}" >&2
+            exit 1
+          fi
+          echo "Version sync verified: ${expected}"
+
       - name: Build desktop installers (Windows)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
@@ -447,6 +522,46 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/validate-release-artifacts.py release-artifacts
+
+      - name: Remove existing assets from target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+              --jq '.id' 2>/dev/null || true
+          )"
+
+          if [ -z "${release_id}" ]; then
+            echo "Release ${RELEASE_TAG} does not exist yet. No assets to clean."
+            exit 0
+          fi
+
+          existing_assets="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+              | jq -s -r '
+                  map(if type == "array" then . else [] end)
+                  | add
+                  | .[]
+                  | [.id, .name]
+                  | @tsv
+                '
+          )"
+
+          if [ -z "${existing_assets}" ]; then
+            echo "Release ${RELEASE_TAG} has no existing assets."
+            exit 0
+          fi
+
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [ -n "${asset_id}" ] || continue
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+            echo "Deleted existing release asset: id=${asset_id}, name=${asset_name}"
+          done <<< "${existing_assets}"
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2.5.0
