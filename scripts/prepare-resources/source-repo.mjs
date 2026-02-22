@@ -103,8 +103,8 @@ export const ensureSourceRepo = ({
     }
 
     const checkoutArgs = isSourceRepoRefCommitSha
-      ? ['-C', sourceDir, 'checkout', '--detach', 'FETCH_HEAD']
-      : ['-C', sourceDir, 'checkout', '-B', sourceRepoRef, 'FETCH_HEAD'];
+      ? ['-C', sourceDir, 'checkout', '--detach', '-f', 'FETCH_HEAD']
+      : ['-C', sourceDir, 'checkout', '-f', '-B', sourceRepoRef, 'FETCH_HEAD'];
     const checkoutResult = spawnSync('git', checkoutArgs, { stdio: 'inherit' });
     if (checkoutResult.status !== 0) {
       throw new Error(`Failed to checkout upstream ref ${sourceRepoRef}`);

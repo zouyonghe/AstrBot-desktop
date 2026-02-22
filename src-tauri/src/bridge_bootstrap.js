@@ -20,6 +20,7 @@
     SET_AUTH_TOKEN: 'desktop_bridge_set_auth_token',
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
     STOP_BACKEND: 'desktop_bridge_stop_backend',
+    OPEN_EXTERNAL_URL: 'desktop_bridge_open_external_url',
   });
   const TRAY_RESTART_BACKEND_EVENT = '{TRAY_RESTART_BACKEND_EVENT}';
 
@@ -404,6 +405,18 @@
       });
     },
     stopBackend: () => invokeBridge(BRIDGE_COMMANDS.STOP_BACKEND),
+    openExternalUrl: (url) => {
+      const rawUrl = typeof url === 'string' ? url : String(url ?? '');
+      if (!rawUrl.trim()) {
+        return Promise.resolve({
+          ok: true,
+          reason: null,
+        });
+      }
+      return invokeBridge(BRIDGE_COMMANDS.OPEN_EXTERNAL_URL, {
+        url: rawUrl,
+      });
+    },
     onTrayRestartBackend,
   };
 

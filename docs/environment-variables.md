@@ -39,7 +39,8 @@
 | `ASTRBOT_SOURCE_GIT_REF_IS_COMMIT` | 将 ref 明确标记为 commit | 默认关闭 |
 | `ASTRBOT_SOURCE_DIR` | 指定本地源码目录（跳过 clone/fetch） | 默认 `vendor/AstrBot` |
 | `ASTRBOT_DESKTOP_VERSION` | 桌面版本号覆盖 | 默认读取源码 `pyproject.toml` |
-| `ASTRBOT_DESKTOP_STRICT_BRIDGE_EXPECTATIONS` | 桥接产物校验严格模式 | 默认关闭 |
+| `ASTRBOT_DESKTOP_RELEASE_BASE_URL` | 构建 dashboard 时覆盖 release 跳转基地址（注入 `VITE_ASTRBOT_RELEASE_BASE_URL`） | 默认 `https://github.com/AstrBotDevs/AstrBot-desktop/releases` |
+| `ASTRBOT_DESKTOP_STRICT_BRIDGE_EXPECTATIONS` | 桥接产物校验与 header 补丁匹配严格模式 | 默认关闭（不匹配仅告警） |
 | `ASTRBOT_PBS_RELEASE` | python-build-standalone release | 默认 `20260211` |
 | `ASTRBOT_PBS_VERSION` | python-build-standalone Python 版本 | 默认 `3.12.12` |
 | `ASTRBOT_DESKTOP_BACKEND_RUNTIME` | 外部后端运行时根目录 | 存在时优先使用 |

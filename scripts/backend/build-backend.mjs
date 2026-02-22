@@ -30,7 +30,8 @@ const runtimeSource =
   process.env.ASTRBOT_DESKTOP_CPYTHON_HOME;
 const requirePipProbe = process.env.ASTRBOT_DESKTOP_REQUIRE_PIP === '1';
 
-const sourceEntries = ['astrbot', 'main.py', 'runtime_bootstrap.py', 'requirements.txt'];
+const requiredSourceEntries = ['astrbot', 'main.py', 'runtime_bootstrap.py', 'requirements.txt'];
+const optionalSourceEntries = ['changelogs'];
 
 const requireSourceDir = () => {
   if (!sourceDir) {
@@ -49,12 +50,22 @@ const prepareOutputDirs = () => {
 };
 
 const copyAppSources = (resolvedSourceDir) => {
-  for (const relativePath of sourceEntries) {
+  for (const relativePath of requiredSourceEntries) {
     const sourcePath = path.join(resolvedSourceDir, relativePath);
     const targetPath = path.join(appDir, relativePath);
     if (!fs.existsSync(sourcePath)) {
       throw new Error(`Backend source path does not exist: ${sourcePath}`);
     }
+    copyTree(sourcePath, targetPath);
+  }
+
+  // Changelog files are used by dashboard changelog APIs; keep build resilient for older sources.
+  for (const relativePath of optionalSourceEntries) {
+    const sourcePath = path.join(resolvedSourceDir, relativePath);
+    if (!fs.existsSync(sourcePath)) {
+      continue;
+    }
+    const targetPath = path.join(appDir, relativePath);
     copyTree(sourcePath, targetPath);
   }
 };

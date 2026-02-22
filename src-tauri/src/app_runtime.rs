@@ -23,7 +23,8 @@ pub(crate) fn run() {
             crate::desktop_bridge_commands::desktop_bridge_get_backend_state,
             crate::desktop_bridge_commands::desktop_bridge_set_auth_token,
             crate::desktop_bridge_commands::desktop_bridge_restart_backend,
-            crate::desktop_bridge_commands::desktop_bridge_stop_backend
+            crate::desktop_bridge_commands::desktop_bridge_stop_backend,
+            crate::desktop_bridge_commands::desktop_bridge_open_external_url
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
