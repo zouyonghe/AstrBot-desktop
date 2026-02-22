@@ -15,4 +15,4 @@ runs:
 
     - name: Verify synced desktop version files
       shell: bash
-      run: bash scripts/ci/verify-desktop-version.sh "${{ inputs.astrbot_version }}"
+      run: python3 scripts/ci/verify-desktop-version.py "${{ inputs.astrbot_version }}"

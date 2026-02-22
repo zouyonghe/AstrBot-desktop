@@ -17,6 +17,20 @@ if [ -z "${GITHUB_REPOSITORY:-}" ]; then
   exit 1
 fi
 
+default_cleanup_repository="AstrBotDevs/AstrBot-desktop"
+cleanup_repository="${ASTRBOT_RELEASE_CLEANUP_TARGET_REPOSITORY:-${default_cleanup_repository}}"
+allow_any_repository_flag="$(printf '%s' "${ASTRBOT_RELEASE_CLEANUP_ALLOW_ANY_REPOSITORY:-0}" | tr '[:upper:]' '[:lower:]')"
+case "${allow_any_repository_flag}" in
+  1|true|yes|on) allow_any_repository="true" ;;
+  *) allow_any_repository="false" ;;
+esac
+
+if [ "${allow_any_repository}" != "true" ] && [ "${GITHUB_REPOSITORY}" != "${cleanup_repository}" ]; then
+  echo "Skipping release asset cleanup for non-target repository ${GITHUB_REPOSITORY} (target=${cleanup_repository})."
+  echo "Set ASTRBOT_RELEASE_CLEANUP_ALLOW_ANY_REPOSITORY=1 to bypass this protection."
+  exit 0
+fi
+
 release_lookup_err=""
 assets_list_err=""
 assets_list_output=""
