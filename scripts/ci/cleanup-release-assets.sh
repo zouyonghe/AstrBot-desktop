@@ -22,24 +22,17 @@ if [ -z "${release_id}" ]; then
   exit 0
 fi
 
-existing_assets="$(
-  gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
-    | jq -s -r '
-        map(if type == "array" then . else [] end)
-        | add
-        | .[]
-        | [.id, .name]
-        | @tsv
-      '
-)"
-
-if [ -z "${existing_assets}" ]; then
-  echo "Release ${RELEASE_TAG} has no existing assets."
-  exit 0
-fi
-
+deleted_count=0
 while IFS=$'\t' read -r asset_id asset_name; do
   [ -n "${asset_id}" ] || continue
   gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
   echo "Deleted existing release asset: id=${asset_id}, name=${asset_name}"
-done <<< "${existing_assets}"
+  deleted_count=$((deleted_count + 1))
+done < <(
+  gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+    --jq 'if type == "array" then .[] else empty end | [.id, .name] | @tsv'
+)
+
+if [ "${deleted_count}" -eq 0 ]; then
+  echo "Release ${RELEASE_TAG} has no existing assets."
+fi

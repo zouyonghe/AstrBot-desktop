@@ -2,16 +2,17 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/version-utils.sh
+. "${script_dir}/lib/version-utils.sh"
+
 if [ "${#}" -ne 1 ]; then
   echo "Usage: $0 <expected-astrbot-version>" >&2
   exit 2
 fi
 
 raw_expected="$1"
-expected="$(
-  printf '%s' "${raw_expected}" \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^[vV]+//'
-)"
+expected="$(normalize_version "${raw_expected}")"
 
 if [ -z "${expected}" ]; then
   echo "Invalid expected version input: '${raw_expected}'" >&2
