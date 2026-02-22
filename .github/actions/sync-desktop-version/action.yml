@@ -1,0 +1,22 @@
+name: Sync and Verify Desktop Version
+description: Sync desktop version files and verify package metadata consistency.
+
+inputs:
+  astrbot_version:
+    description: AstrBot version from resolve_build_context (accepts with or without leading v).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Assert version normalization parity
+      shell: bash
+      run: bash scripts/ci/assert-version-normalization-equivalence.sh
+
+    - name: Sync desktop version
+      shell: bash
+      run: bash scripts/ci/sync-desktop-version.sh "${{ inputs.astrbot_version }}"
+
+    - name: Verify synced desktop version files
+      shell: bash
+      run: python3 scripts/ci/verify-desktop-version.py "${{ inputs.astrbot_version }}"

@@ -103,16 +103,21 @@ jobs:
         with:
           version: 10.28.2
 
+      - name: Resolve desktop version env
+        id: desktop_version
+        shell: bash
+        run: bash scripts/ci/resolve-desktop-version.sh "${{ needs.resolve_build_context.outputs.astrbot_version }}" "${GITHUB_OUTPUT}"
+
       - name: Sync desktop version to upstream tag
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
-          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+          ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
         run: make update
 
       - name: Commit and push version files
         env:
-          ASTRBOT_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+          ASTRBOT_VERSION: ${{ steps.desktop_version.outputs.normalized }}
           TARGET_REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -173,11 +178,21 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Resolve desktop version env
+        id: desktop_version
+        shell: bash
+        run: bash scripts/ci/resolve-desktop-version.sh "${{ needs.resolve_build_context.outputs.astrbot_version }}" "${GITHUB_OUTPUT}"
+
+      - name: Sync and verify desktop version for this build
+        uses: ./.github/actions/sync-desktop-version
+        with:
+          astrbot_version: ${{ steps.desktop_version.outputs.normalized }}
+
       - name: Build desktop installers (Linux)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
-          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+          ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: cargo tauri build --bundles deb,rpm
@@ -216,6 +231,16 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Resolve desktop version env
+        id: desktop_version
+        shell: bash
+        run: bash scripts/ci/resolve-desktop-version.sh "${{ needs.resolve_build_context.outputs.astrbot_version }}" "${GITHUB_OUTPUT}"
+
+      - name: Sync and verify desktop version for this build
+        uses: ./.github/actions/sync-desktop-version
+        with:
+          astrbot_version: ${{ steps.desktop_version.outputs.normalized }}
+
       - name: Resolve macOS app bundle name
         id: resolve_macos_app_bundle
         env:
@@ -238,7 +263,7 @@ jobs:
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
-          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+          ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS: ${{ vars.ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS || '3' }}
           ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS: ${{ vars.ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS || '8' }}
@@ -372,11 +397,21 @@ jobs:
       - name: Setup desktop build environment
         uses: ./.github/actions/setup-desktop-build
 
+      - name: Resolve desktop version env
+        id: desktop_version
+        shell: bash
+        run: bash scripts/ci/resolve-desktop-version.sh "${{ needs.resolve_build_context.outputs.astrbot_version }}" "${GITHUB_OUTPUT}"
+
+      - name: Sync and verify desktop version for this build
+        uses: ./.github/actions/sync-desktop-version
+        with:
+          astrbot_version: ${{ steps.desktop_version.outputs.normalized }}
+
       - name: Build desktop installers (Windows)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
-          ASTRBOT_DESKTOP_VERSION: v${{ needs.resolve_build_context.outputs.astrbot_version }}
+          ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -447,6 +482,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/validate-release-artifacts.py release-artifacts
+
+      - name: Remove existing assets from target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
+        shell: bash
+        run: bash scripts/ci/cleanup-release-assets.sh
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2.5.0
