@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  patchDesktopReleaseRedirectBehavior,
   patchMonacoCssNestingWarnings,
   verifyDesktopBridgeArtifacts,
 } from './desktop-bridge-checks.mjs';
@@ -67,11 +66,6 @@ export const prepareWebui = async ({
   const dashboardDir = path.join(sourceDir, 'dashboard');
   ensurePackageInstall(dashboardDir, 'AstrBot dashboard');
   await patchMonacoCssNestingWarnings({ dashboardDir, projectRoot });
-  await patchDesktopReleaseRedirectBehavior({
-    dashboardDir,
-    projectRoot,
-    strictPatternMatch: isDesktopBridgeExpectationStrict,
-  });
   await verifyDesktopBridgeArtifacts({
     dashboardDir,
     projectRoot,

@@ -155,6 +155,281 @@
       authToken: typeof token === 'string' && token ? token : null
     });
 
+  const IS_DEV =
+    (typeof process !== 'undefined' &&
+      process.env &&
+      process.env.NODE_ENV !== 'production') ||
+    (typeof __DEV__ !== 'undefined' && __DEV__ === true);
+  const devWarn = (...args) => {
+    if (!IS_DEV) return;
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+      console.warn(...args);
+    }
+  };
+  const safePatch = (label, patchFn) => {
+    try {
+      patchFn();
+    } catch (error) {
+      if (!(error instanceof TypeError)) {
+        throw error;
+      }
+      devWarn(`astrbotDesktop: failed to patch ${label}`, error);
+    }
+  };
+  const warnExternalUrlBridgeError = (phase, url, error) => {
+    devWarn('[astrbotDesktop] openExternalUrl bridge failure', {
+      phase,
+      url,
+      error,
+    });
+  };
+
+  const normalizeExternalHttpUrl = (rawUrl) => {
+    if (rawUrl instanceof URL) {
+      if (rawUrl.protocol !== 'http:' && rawUrl.protocol !== 'https:') return null;
+      return rawUrl;
+    }
+
+    if (typeof rawUrl !== 'string') return null;
+
+    const normalized = rawUrl.trim();
+    if (!normalized) return null;
+
+    try {
+      const url = new URL(normalized, window.location.href);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      return url;
+    } catch {
+      return null;
+    }
+  };
+
+  const openExternalUrl = (rawUrl) => {
+    const url = normalizeExternalHttpUrl(rawUrl);
+    if (!url) return false;
+    if (url.origin === window.location.origin) {
+      return false;
+    }
+
+    const bridgeOpenExternalUrl =
+      typeof window.astrbotDesktop?.openExternalUrl === 'function'
+        ? window.astrbotDesktop.openExternalUrl.bind(window.astrbotDesktop)
+        : null;
+    if (!bridgeOpenExternalUrl) return false;
+    const href = url.toString();
+    const isBridgeFailureResult = (result) =>
+      !!result &&
+      typeof result === 'object' &&
+      Object.prototype.hasOwnProperty.call(result, 'ok') &&
+      result.ok === false;
+
+    try {
+      const bridgeResult = bridgeOpenExternalUrl(href);
+      if (bridgeResult && typeof bridgeResult.then === 'function') {
+        Promise.resolve(bridgeResult)
+          .then((result) => {
+            if (isBridgeFailureResult(result)) {
+              warnExternalUrlBridgeError('result', href, result.reason ?? result);
+            }
+          })
+          .catch((error) => {
+            warnExternalUrlBridgeError('async', href, error);
+          });
+        return true;
+      }
+      if (isBridgeFailureResult(bridgeResult)) {
+        warnExternalUrlBridgeError('result', href, bridgeResult.reason ?? bridgeResult);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      warnExternalUrlBridgeError('sync', href, error);
+      return false;
+    }
+  };
+
+  const findAnchorFromEvent = (event) => {
+    const target = event.target;
+    if (target instanceof Element && typeof target.closest === 'function') {
+      const direct = target.closest('a[href]');
+      if (direct instanceof HTMLAnchorElement) return direct;
+    }
+    // Support anchors inside shadow DOM by walking the composed event path.
+    if (typeof event.composedPath === 'function') {
+      for (const node of event.composedPath()) {
+        if (node instanceof HTMLAnchorElement && node.hasAttribute('href')) {
+          return node;
+        }
+      }
+    }
+    return null;
+  };
+  const patchLocationHref = (locationObject) => {
+    const descriptor =
+      Object.getOwnPropertyDescriptor(locationObject, 'href') ||
+      Object.getOwnPropertyDescriptor(window.Location?.prototype ?? {}, 'href');
+    const nativeHrefGetter =
+      descriptor && typeof descriptor.get === 'function'
+        ? descriptor.get.bind(locationObject)
+        : null;
+    const nativeHrefSetter =
+      descriptor && typeof descriptor.set === 'function'
+        ? descriptor.set.bind(locationObject)
+        : null;
+    if (!nativeHrefSetter) return;
+
+    safePatch('location.href', () => {
+      Object.defineProperty(locationObject, 'href', {
+        configurable: true,
+        enumerable: descriptor?.enumerable ?? true,
+        get() {
+          if (nativeHrefGetter) {
+            return nativeHrefGetter();
+          }
+          return locationObject.toString();
+        },
+        set(url) {
+          if (openExternalUrl(url)) {
+            return;
+          }
+          nativeHrefSetter(url);
+        },
+      });
+    });
+  };
+
+  // Best-effort fake Window-like handle for callers that only check `closed` and `location.href`.
+  const createWindowOpenHandle = (url) => {
+    let closed = false;
+    const locationProxy = {
+      href: String(url ?? ''),
+    };
+    return {
+      get closed() {
+        return closed;
+      },
+      set closed(value) {
+        closed = !!value;
+      },
+      close: () => {
+        closed = true;
+      },
+      focus: () => {},
+      location: locationProxy,
+      opener: null,
+    };
+  };
+
+  const installExternalAnchorInterceptor = () => {
+    document.addEventListener(
+      'click',
+      (event) => {
+        if (
+          event.defaultPrevented ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
+
+        const anchor = findAnchorFromEvent(event);
+        if (!anchor) return;
+        if (anchor.hasAttribute('download')) return;
+        const rawHref = anchor.getAttribute('href') || anchor.href || '';
+        if (!openExternalUrl(rawHref)) return;
+
+        event.preventDefault();
+      },
+      true,
+    );
+  };
+
+  const installWindowOpenBridge = () => {
+    const nativeWindowOpen =
+      typeof window.open === 'function' ? window.open.bind(window) : null;
+
+    const bridgeWindowOpen = (url, target, features) => {
+      if (target === '_self' || target === '_top' || target === '_parent') {
+        if (nativeWindowOpen) {
+          return nativeWindowOpen(url, target, features);
+        }
+        return null;
+      }
+
+      if (openExternalUrl(url)) {
+        // Lightweight window-like handle for callers that only check basic fields.
+        return createWindowOpenHandle(url);
+      }
+
+      if (nativeWindowOpen) {
+        return nativeWindowOpen(url, target, features);
+      }
+      return null;
+    };
+
+    if (nativeWindowOpen) {
+      safePatch('window.__astrbotNativeWindowOpen', () => {
+        Object.defineProperty(window, '__astrbotNativeWindowOpen', {
+          configurable: true,
+          writable: false,
+          enumerable: false,
+          value: nativeWindowOpen,
+        });
+      });
+    }
+
+    safePatch('window.open', () => {
+      window.open = bridgeWindowOpen;
+    });
+  };
+
+  const installLocationNavigationBridge = () => {
+    const locationObject = window.location;
+    const nativeAssign =
+      typeof locationObject.assign === 'function'
+        ? locationObject.assign.bind(locationObject)
+        : null;
+    const nativeReplace =
+      typeof locationObject.replace === 'function'
+        ? locationObject.replace.bind(locationObject)
+        : null;
+
+    if (nativeAssign) {
+      safePatch('location.assign', () => {
+        locationObject.assign = (url) => {
+          if (openExternalUrl(url)) {
+            return;
+          }
+          nativeAssign(url);
+        };
+      });
+    }
+
+    if (nativeReplace) {
+      safePatch('location.replace', () => {
+        locationObject.replace = (url) => {
+          if (openExternalUrl(url)) {
+            return;
+          }
+          nativeReplace(url);
+        };
+      });
+    }
+
+    patchLocationHref(locationObject);
+  };
+  let navigationBridgesInstalled = false;
+  const installNavigationBridges = () => {
+    if (navigationBridgesInstalled) return;
+    navigationBridgesInstalled = true;
+    installWindowOpenBridge();
+    installExternalAnchorInterceptor();
+    installLocationNavigationBridge();
+  };
+
   const RUNTIME_BRIDGE_DETAIL_MAX_LENGTH = 240;
   const RUNTIME_BRIDGE_DETAIL_MAX_ITEMS = 8;
   const RUNTIME_BRIDGE_TRUE_STRINGS = new Set(['1', 'true', 'yes', 'on']);
@@ -356,9 +631,10 @@
   };
 
   const patchLocalStorageTokenSync = () => {
+    if (window.__astrbotDesktopTokenSyncPatched) return;
     try {
       const storage = window.localStorage;
-      if (!storage || window.__astrbotDesktopTokenSyncPatched) return;
+      if (!storage) return;
       window.__astrbotDesktopTokenSyncPatched = true;
 
       const rawSetItem = storage.setItem?.bind(storage);
@@ -420,6 +696,7 @@
     onTrayRestartBackend,
   };
 
+  installNavigationBridges();
   void listenToTrayRestartBackendEvent();
   patchLocalStorageTokenSync();
   void syncAuthToken();

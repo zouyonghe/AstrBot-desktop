@@ -5,11 +5,23 @@ import { spawnSync } from 'node:child_process';
 export const DEFAULT_ASTRBOT_SOURCE_GIT_URL = 'https://github.com/AstrBotDevs/AstrBot.git';
 
 const SOURCE_REPO_REF_COMMIT_HINT_TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+const SOURCE_FORCE_CHECKOUT_TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 // Accept full SHAs and longer abbreviated SHAs (>= 12) to reduce false positives
 // from hex-looking branch/tag names while still supporting common CI short refs.
 const GIT_COMMIT_SHA_PATTERN = /^[0-9a-f]{12,64}$/i;
 // Treat both `v1.2.3` and `1.2.3` style refs as release tags.
 const VERSION_TAG_REF_PATTERN = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+const shouldForceSourceCheckout = () => {
+  const rawCi = String(process.env.CI || '').trim().toLowerCase();
+  if (SOURCE_FORCE_CHECKOUT_TRUTHY.has(rawCi)) {
+    return true;
+  }
+  const raw = String(process.env.ASTRBOT_SOURCE_FORCE_CHECKOUT || '')
+    .trim()
+    .toLowerCase();
+  return SOURCE_FORCE_CHECKOUT_TRUTHY.has(raw);
+};
 
 export const normalizeSourceRepoConfig = (sourceRepoUrlRaw, sourceRepoRefRaw) => {
   if (!sourceRepoUrlRaw) {
@@ -102,9 +114,10 @@ export const ensureSourceRepo = ({
       throw new Error(`Failed to fetch upstream ref ${sourceRepoRef}`);
     }
 
+    const forceCheckoutArgs = shouldForceSourceCheckout() ? ['-f'] : [];
     const checkoutArgs = isSourceRepoRefCommitSha
-      ? ['-C', sourceDir, 'checkout', '--detach', '-f', 'FETCH_HEAD']
-      : ['-C', sourceDir, 'checkout', '-f', '-B', sourceRepoRef, 'FETCH_HEAD'];
+      ? ['-C', sourceDir, 'checkout', '--detach', ...forceCheckoutArgs, 'FETCH_HEAD']
+      : ['-C', sourceDir, 'checkout', ...forceCheckoutArgs, '-B', sourceRepoRef, 'FETCH_HEAD'];
     const checkoutResult = spawnSync('git', checkoutArgs, { stdio: 'inherit' });
     if (checkoutResult.status !== 0) {
       throw new Error(`Failed to checkout upstream ref ${sourceRepoRef}`);
