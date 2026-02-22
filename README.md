@@ -169,5 +169,3 @@ npm -v
 npx -v
 uvx --version
 ```
-
-说明：有时会把 `npx` 误写为 `nvx`，正确命令是 `npx`。
