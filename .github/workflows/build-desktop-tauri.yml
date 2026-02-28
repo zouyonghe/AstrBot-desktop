@@ -514,6 +514,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
           make_latest: ${{ needs.resolve_build_context.outputs.release_prerelease != 'true' }}
+          overwrite_files: true
           files: release-artifacts/**/*
           fail_on_unmatched_files: true
 

@@ -328,15 +328,19 @@ elif [ "${build_mode}" = "tag-poll" ]; then
     echo "Tag polling run detected latest upstream tag: ${source_git_ref}"
   fi
 
-  http_status="$(curl -sS -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${GH_REPOSITORY}/releases/tags/${source_git_ref}")"
-  if [ "${http_status}" = "200" ]; then
-    should_build="false"
-    echo "Release ${source_git_ref} already exists. Tag unchanged, skipping build."
+  if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+    echo "workflow_dispatch tag-poll mode: forcing build even if release ${source_git_ref} already exists."
   else
-    echo "Release ${source_git_ref} not found (HTTP ${http_status}). Build will run."
+    http_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${GH_REPOSITORY}/releases/tags/${source_git_ref}")"
+    if [ "${http_status}" = "200" ]; then
+      should_build="false"
+      echo "Release ${source_git_ref} already exists. Tag unchanged, skipping build."
+    else
+      echo "Release ${source_git_ref} not found (HTTP ${http_status}). Build will run."
+    fi
   fi
 fi
 
