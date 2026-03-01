@@ -64,7 +64,7 @@
 - `restart_backend_flow.rs`
   - backend 重启任务与并发判定流程封装。
 - `tray_menu_handler.rs`
-  - 托盘菜单事件动作分发与重启链路处理。
+  - 托盘菜单事件动作分发与重启流程处理。
 - `window_actions.rs`
   - 主窗口动作与托盘文案刷新联动封装。
 - `tray_setup.rs`
@@ -153,6 +153,6 @@
 - 本地统一入口：`make test`
   - 全量 Rust 单测
   - `prepare-resources` Node 行为测试
-- CI 同步门禁：
+- CI 同步校验：
   - `check-rust.yml`
   - `check-scripts.yml`

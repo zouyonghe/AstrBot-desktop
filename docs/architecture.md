@@ -81,7 +81,7 @@ HTTP 响应解析模块：
 
 - 状态码提取（status line）
 - chunked body 解码
-- JSON 响应提取（2xx 门禁）
+- JSON 响应提取（仅 2xx 状态码）
 - 后端 `start_time` 字段解析
 
 ### 2.9 `src-tauri/src/process_control.rs`
@@ -202,7 +202,7 @@ desktop bridge 模块：
 托盘菜单处理模块：
 
 - 菜单动作分发执行
-- tray 触发重启链路编排
+- tray 触发重启流程的编排
 - tray quit 退出路径收敛
 
 ### 2.24 `src-tauri/src/window_actions.rs`
@@ -299,7 +299,7 @@ desktop bridge 模块：
 退出状态包装模块：
 
 - `exit_state` 锁读写包装
-- 退出流程状态方法下沉（mark/is_quitting/cleanup allow）
+- 退出流程状态方法迁移（mark/is_quitting/cleanup allow）
 - 锁异常日志语义统一
 
 ### 2.36 `src-tauri/src/desktop_bridge_commands.rs`
@@ -379,7 +379,7 @@ bridge 命令模块：
 - `mode-tasks.mjs`：`webui/backend/all` 任务实现
 - `desktop-bridge-checks.mjs`：bridge 工件校验
 
-## 5. 测试与门禁
+## 5. 测试与校验
 
 本地：
 
@@ -393,6 +393,6 @@ CI：
 
 ## 6. 演进建议
 
-- 继续把 `main.rs` 中仍偏纯函数的工具逻辑按职责下沉。
-- 为退出/重启链路补充更贴近事件流的集成测试。
+- 继续把 `main.rs` 中仍偏纯函数的工具逻辑按职责迁移。
+- 为退出/重启流程补充更贴近事件流的集成测试。
 - 维持“编排层薄、模块层厚”的边界纪律。

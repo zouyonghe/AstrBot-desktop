@@ -10,9 +10,9 @@ Phase 7 后，`main.rs` 已降到约 143 行，主要剩余内容为：
 
 ## 2. 目标
 
-1. 将常量与共享 helper 下沉到专用模块。
+1. 将常量与共享 helper 迁移到专用模块。
 2. 通过 `re-export` 维持现有 `crate::CONST` / `crate::fn` 调用兼容。
-3. 把入口文件收敛为最小启动壳层。
+3. 把入口文件精简为最小启动壳层。
 
 ## 3. 非目标
 
@@ -29,10 +29,10 @@ Phase 7 后，`main.rs` 已降到约 143 行，主要剩余内容为：
 ## 5. 拆分顺序（建议）
 
 1. 新建 `app_constants.rs`
-- 下沉全局 timeout/log/tray/startup 相关常量。
+- 迁移全局 timeout/log/tray/startup 相关常量。
 
 2. 新建 `app_helpers.rs`
-- 下沉日志 helper、bridge 注入、路径覆写、debug command 组装。
+- 迁移日志 helper、bridge 注入、路径覆写、debug command 组装。
 
 3. 收敛 `main.rs`
 - 保留模块声明、re-export 与 `main()`。
@@ -49,8 +49,8 @@ Phase 7 后，`main.rs` 已降到约 143 行，主要剩余内容为：
 ## 7. 实施记录（归档）
 
 1. 新增 Phase 8 计划文档。
-2. 新增常量模块（`src-tauri/src/app_constants.rs`），下沉 timeout/log/tray/startup 常量。
-3. 新增 helper 模块（`src-tauri/src/app_helpers.rs`），下沉日志、bridge 注入、路径覆写与导航 helper。
+2. 新增常量模块（`src-tauri/src/app_constants.rs`），迁移 timeout/log/tray/startup 常量。
+3. 新增 helper 模块（`src-tauri/src/app_helpers.rs`），迁移日志、bridge 注入、路径覆写与导航 helper。
 4. `main.rs` 统一 re-export 常量、helper、类型，保持现有 `crate::*` 调用兼容。
 5. `main.rs` 收敛至约 55 行，成为最小入口壳层。
 6. 同步文档索引与架构/目录说明（`README.md`、`docs/architecture.md`、`docs/repository-structure.md`）。

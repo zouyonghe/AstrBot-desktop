@@ -50,4 +50,4 @@
 ## 3. 维护约定
 
 - 新增 `ASTRBOT_*` 变量时，必须同步更新本文件与对应模块注释。
-- 变量解析与边界逻辑优先收敛到 `src-tauri/src/backend_config.rs` 或 `scripts/prepare-resources/*` 子模块，避免散落在入口文件。
+- 变量解析与边界逻辑建议集中在 `src-tauri/src/backend_config.rs` 或 `scripts/prepare-resources/*` 子模块，避免散落在入口文件。
