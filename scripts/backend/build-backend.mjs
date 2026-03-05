@@ -30,7 +30,7 @@ const runtimeSource =
   process.env.ASTRBOT_DESKTOP_CPYTHON_HOME;
 const requirePipProbe = process.env.ASTRBOT_DESKTOP_REQUIRE_PIP === '1';
 
-const requiredSourceEntries = ['astrbot', 'main.py', 'runtime_bootstrap.py', 'requirements.txt'];
+const requiredSourceEntries = ['astrbot', 'main.py', 'requirements.txt'];
 const optionalSourceEntries = ['changelogs'];
 
 const requireSourceDir = () => {
