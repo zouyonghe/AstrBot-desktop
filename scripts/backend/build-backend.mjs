@@ -63,17 +63,15 @@ const resolveImportScannerPythonExecutable = () => {
 const IMPORT_SCANNER_TIMEOUT_MS = 30_000;
 const importScannerCache = new Map();
 
-const getImportScannerCacheKey = (filePath) => {
+const runImportScanner = (filePath) => {
+  let cacheKey = '';
   try {
     const stat = fs.statSync(filePath);
-    return `${filePath}:${stat.mtimeMs}:${stat.size}`;
+    cacheKey = `${filePath}:${stat.mtimeMs}:${stat.size}`;
   } catch {
-    return '';
+    // Leave cacheKey empty when file metadata cannot be read.
   }
-};
 
-const runImportScanner = (filePath) => {
-  const cacheKey = getImportScannerCacheKey(filePath);
   if (cacheKey && importScannerCache.has(cacheKey)) {
     return importScannerCache.get(cacheKey);
   }
@@ -85,6 +83,13 @@ const runImportScanner = (filePath) => {
     timeout: IMPORT_SCANNER_TIMEOUT_MS,
   });
 
+  const warnFailure = (details) => {
+    console.warn(
+      `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
+    );
+    return [];
+  };
+
   if (result.error) {
     if (result.error.code === 'ETIMEDOUT') {
       console.warn(
@@ -92,19 +97,12 @@ const runImportScanner = (filePath) => {
       );
       return [];
     }
-    const details = result.error.message || 'unknown process error';
-    console.warn(
-      `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
-    );
-    return [];
+    return warnFailure(result.error.message || 'unknown process error');
   }
 
   if (result.status !== 0) {
-    const details = result.error?.message || result.stderr?.trim() || `exit code ${result.status}`;
-    console.warn(
-      `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
-    );
-    return [];
+    const details = result.stderr?.trim() || `exit code ${result.status}`;
+    return warnFailure(details);
   }
 
   try {
@@ -129,7 +127,7 @@ const extractImportedRootModules = (filePath) => {
   const relativeBareImports = new Set();
   const descriptors = runImportScanner(filePath);
 
-  const addRoot = (name, metadata = null) => {
+  const addRoot = (name, fromRelativeBareImport = false) => {
     if (typeof name !== 'string') {
       return;
     }
@@ -137,7 +135,7 @@ const extractImportedRootModules = (filePath) => {
     if (!rootModule || rootModule === '*') {
       return;
     }
-    if (metadata?.fromRelativeBareImport) {
+    if (fromRelativeBareImport) {
       relativeBareImports.add(rootModule);
     }
     imports.add(rootModule);
@@ -170,7 +168,7 @@ const extractImportedRootModules = (filePath) => {
           if (typeof importedName !== 'string') {
             continue;
           }
-          addRoot(importedName, { fromRelativeBareImport: true });
+          addRoot(importedName, true);
         }
         continue;
       }
