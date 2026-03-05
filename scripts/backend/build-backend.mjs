@@ -60,14 +60,31 @@ const resolveImportScannerPythonExecutable = () => {
   return process.platform === 'win32' ? 'python' : 'python3';
 };
 
+const IMPORT_SCANNER_TIMEOUT_MS = 30_000;
+
 const runImportScanner = (filePath) => {
   const scannerPython = resolveImportScannerPythonExecutable();
   const result = spawnSync(scannerPython, [importScannerScriptPath, filePath], {
     encoding: 'utf8',
     windowsHide: true,
+    timeout: IMPORT_SCANNER_TIMEOUT_MS,
   });
 
-  if (result.error || result.status !== 0) {
+  if (result.error) {
+    if (result.error.code === 'ETIMEDOUT') {
+      console.warn(
+        `[build-backend] import scanner timed out after ${IMPORT_SCANNER_TIMEOUT_MS}ms for ${path.basename(filePath)}; skipping import analysis for this file.`,
+      );
+      return [];
+    }
+    const details = result.error.message || 'unknown process error';
+    console.warn(
+      `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
+    );
+    return [];
+  }
+
+  if (result.status !== 0) {
     const details = result.error?.message || result.stderr?.trim() || `exit code ${result.status}`;
     console.warn(
       `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
@@ -89,57 +106,9 @@ const runImportScanner = (filePath) => {
   }
 };
 
-const parseImportedRootModules = (filePath) => {
-  const parsedImports = [];
-  const descriptors = runImportScanner(filePath);
-
-  for (const descriptor of descriptors) {
-    if (!descriptor || typeof descriptor !== 'object') {
-      continue;
-    }
-
-    if (descriptor.kind === 'import') {
-      if (typeof descriptor.module === 'string' && descriptor.module.trim()) {
-        parsedImports.push({
-          name: descriptor.module,
-          requiresAvailableModule: false,
-        });
-      }
-      continue;
-    }
-
-    if (descriptor.kind === 'from') {
-      const level = Number.isInteger(descriptor.level) ? descriptor.level : 0;
-      const moduleSpec = typeof descriptor.module === 'string' ? descriptor.module.trim() : '';
-      const names = Array.isArray(descriptor.names) ? descriptor.names : [];
-
-      if (level > 0) {
-        if (moduleSpec) {
-          parsedImports.push({ name: moduleSpec, requiresAvailableModule: false });
-          continue;
-        }
-
-        for (const importedName of names) {
-          if (typeof importedName !== 'string') {
-            continue;
-          }
-          parsedImports.push({ name: importedName, requiresAvailableModule: true });
-        }
-        continue;
-      }
-
-      if (moduleSpec) {
-        parsedImports.push({ name: moduleSpec, requiresAvailableModule: false });
-      }
-    }
-  }
-
-  return parsedImports;
-};
-
 const extractImportedRootModules = (filePath, availableModules = null) => {
   const imports = new Set();
-  const parsedImports = parseImportedRootModules(filePath);
+  const descriptors = runImportScanner(filePath);
 
   const addRoot = (name, requiresAvailableModule = false) => {
     if (typeof name !== 'string') {
@@ -155,8 +124,42 @@ const extractImportedRootModules = (filePath, availableModules = null) => {
     imports.add(rootModule);
   };
 
-  for (const parsedImport of parsedImports) {
-    addRoot(parsedImport.name, parsedImport.requiresAvailableModule);
+  for (const descriptor of descriptors) {
+    if (!descriptor || typeof descriptor !== 'object') {
+      continue;
+    }
+
+    if (descriptor.kind === 'import') {
+      if (typeof descriptor.module === 'string' && descriptor.module.trim()) {
+        addRoot(descriptor.module, false);
+      }
+      continue;
+    }
+
+    if (descriptor.kind === 'from') {
+      const level = Number.isInteger(descriptor.level) ? descriptor.level : 0;
+      const moduleSpec = typeof descriptor.module === 'string' ? descriptor.module.trim() : '';
+      const names = Array.isArray(descriptor.names) ? descriptor.names : [];
+
+      if (level > 0) {
+        if (moduleSpec) {
+          addRoot(moduleSpec, false);
+          continue;
+        }
+
+        for (const importedName of names) {
+          if (typeof importedName !== 'string') {
+            continue;
+          }
+          addRoot(importedName, true);
+        }
+        continue;
+      }
+
+      if (moduleSpec) {
+        addRoot(moduleSpec, false);
+      }
+    }
   }
 
   return imports;
@@ -216,11 +219,28 @@ const listAvailableRootModules = (resolvedSourceDir) => {
   return modules;
 };
 
+const logUnresolvedImports = (unresolvedImports, entryFile) => {
+  if (unresolvedImports.length === 0) {
+    return;
+  }
+
+  const decorated = unresolvedImports
+    .map(({ file, module }) => `${file} -> ${module}`)
+    .sort()
+    .join(', ');
+
+  console.warn(
+    `[build-backend] unresolved root module imports while scanning ${entryFile}: ` +
+      `${decorated} ` +
+      '(these may be stdlib/third-party imports; verify local helper modules are present when needed).',
+  );
+};
+
 const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py') => {
   const availableModules = listAvailableRootModules(resolvedSourceDir);
   const required = new Set();
   const visitedFiles = new Set();
-  const unresolvedImports = new Map();
+  const unresolvedImports = [];
   const queue = [path.join(resolvedSourceDir, entryFile)];
 
   while (queue.length > 0) {
@@ -234,11 +254,10 @@ const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py'
     for (const importedModule of importedModules) {
       const moduleEntry = availableModules.get(importedModule);
       if (!moduleEntry) {
-        const fileKey = path.basename(currentFile);
-        if (!unresolvedImports.has(fileKey)) {
-          unresolvedImports.set(fileKey, new Set());
-        }
-        unresolvedImports.get(fileKey).add(importedModule);
+        unresolvedImports.push({
+          file: path.basename(currentFile),
+          module: importedModule,
+        });
         continue;
       }
       if (moduleEntry.relativePath === entryFile) {
@@ -251,21 +270,7 @@ const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py'
     }
   }
 
-  if (unresolvedImports.size > 0) {
-    const decorated = [];
-    for (const [file, modules] of unresolvedImports.entries()) {
-      for (const moduleName of modules) {
-        decorated.push(`${file} -> ${moduleName}`);
-      }
-    }
-
-    console.warn(
-      `[build-backend] unresolved root module imports while scanning ${entryFile}: ` +
-        `${decorated.sort().join(', ')} ` +
-        '(these may be stdlib/third-party imports; verify local helper modules are present when needed).',
-    );
-  }
-
+  logUnresolvedImports(unresolvedImports, entryFile);
   return Array.from(required).sort();
 };
 
