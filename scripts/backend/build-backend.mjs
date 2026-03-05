@@ -49,15 +49,63 @@ const prepareOutputDirs = () => {
   fs.mkdirSync(appDir, { recursive: true });
 };
 
-const splitImportTargets = (value) =>
-  value
-    .replace(/[()]/g, ' ')
-    .split(',')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .map((segment) => segment.split(/\s+as\s+/i)[0].trim())
-    .map((segment) => segment.replace(/\\\s*$/g, '').trim())
-    .filter(Boolean);
+const splitImportTargets = (value) => {
+  const results = [];
+  for (const rawSegment of value.replace(/[()]/g, ' ').split(',')) {
+    let segment = rawSegment.trim();
+    if (!segment) {
+      continue;
+    }
+    const [base] = segment.split(/\s+as\s+/i);
+    segment = base.replace(/\\\s*$/g, '').trim();
+    if (!segment) {
+      continue;
+    }
+    results.push(segment);
+  }
+  return results;
+};
+
+const stripPythonInlineComment = (line) => {
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+  let output = '';
+
+  for (const char of line) {
+    if (escaped) {
+      output += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      output += char;
+      escaped = true;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      output += char;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      output += char;
+      continue;
+    }
+
+    if (char === '#' && !inSingleQuote && !inDoubleQuote) {
+      break;
+    }
+
+    output += char;
+  }
+
+  return output;
+};
 
 const collectImportStatements = (lines, filePath) => {
   const statements = [];
@@ -67,7 +115,7 @@ const collectImportStatements = (lines, filePath) => {
   let parenthesisDepth = 0;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].split('#')[0].trim();
+    const line = stripPythonInlineComment(lines[index]).trim();
     if (!line && !pendingStatement) {
       continue;
     }
@@ -104,22 +152,44 @@ const collectImportStatements = (lines, filePath) => {
   return { statements, parsingWarnings };
 };
 
-const parseImportStatement = (
-  statement,
-  lineNumber,
-  filePath,
-  imports,
-  warnings,
-  availableModules = null,
-) => {
-  const normalizedStatement = statement.replace(/\\\s*/g, ' ').replace(/\s+/g, ' ').trim();
+const parseImportStatement = (statement, lineNumber, filePath) => {
+  const normalizedStatement = statement.replace(/\s+/g, ' ').trim();
   if (!normalizedStatement) {
-    return;
+    return null;
   }
 
   const importMatch = normalizedStatement.match(/^import\s+(.+)$/);
   if (importMatch) {
-    for (const modulePart of splitImportTargets(importMatch[1])) {
+    return {
+      kind: 'import',
+      targets: splitImportTargets(importMatch[1]),
+    };
+  }
+
+  const fromImportMatch = normalizedStatement.match(/^from\s+([.A-Za-z_][\w.]*)\s+import\s+(.+)$/);
+  if (fromImportMatch) {
+    return {
+      kind: 'from',
+      moduleSpec: fromImportMatch[1].trim(),
+      importedPart: fromImportMatch[2].trim(),
+    };
+  }
+
+  return {
+    kind: 'unparsed',
+    filePath,
+    lineNumber,
+    normalized: normalizedStatement,
+  };
+};
+
+const resolveParsedImport = (parsedImport, imports, warnings, availableModules = null) => {
+  if (!parsedImport) {
+    return;
+  }
+
+  if (parsedImport.kind === 'import') {
+    for (const modulePart of parsedImport.targets) {
       const rootModule = modulePart.split('.')[0].trim();
       if (rootModule) {
         imports.add(rootModule);
@@ -128,10 +198,8 @@ const parseImportStatement = (
     return;
   }
 
-  const fromImportMatch = normalizedStatement.match(/^from\s+([.A-Za-z_][\w.]*)\s+import\s+(.+)$/);
-  if (fromImportMatch) {
-    const moduleSpec = fromImportMatch[1].trim();
-    const importedPart = fromImportMatch[2].trim();
+  if (parsedImport.kind === 'from') {
+    const { moduleSpec, importedPart } = parsedImport;
     if (moduleSpec.startsWith('.')) {
       const localModule = moduleSpec.replace(/^\.+/, '').split('.')[0].trim();
       if (localModule) {
@@ -159,7 +227,7 @@ const parseImportStatement = (
   }
 
   warnings.push(
-    `unparsed import statement in ${path.basename(filePath)}:${lineNumber}: ${normalizedStatement}`,
+    `unparsed import statement in ${path.basename(parsedImport.filePath)}:${parsedImport.lineNumber}: ${parsedImport.normalized}`,
   );
 };
 
@@ -176,7 +244,8 @@ const extractImportedRootModules = (filePath, availableModules = null) => {
   const { statements, parsingWarnings } = collectImportStatements(lines, filePath);
 
   for (const { statement, line } of statements) {
-    parseImportStatement(statement, line, filePath, imports, parsingWarnings, availableModules);
+    const parsedImport = parseImportStatement(statement, line, filePath);
+    resolveParsedImport(parsedImport, imports, parsingWarnings, availableModules);
   }
 
   warnImportScannerWarnings(parsingWarnings);
