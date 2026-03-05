@@ -176,7 +176,12 @@ const collectImportStatements = (lines, filePath) => {
   let parenthesisDepth = 0;
 
   for (let index = 0; index < lines.length; index += 1) {
+    const startedInTripleQuote =
+      commentStripState.inTripleSingleQuote || commentStripState.inTripleDoubleQuote;
     const line = stripPythonInlineComment(lines[index], commentStripState).trim();
+    if (startedInTripleQuote && !pendingStatement) {
+      continue;
+    }
     if (!line && !pendingStatement) {
       continue;
     }
