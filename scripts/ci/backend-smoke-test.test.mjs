@@ -210,6 +210,20 @@ test('runCli returns 1 and emits labeled failure message when main throws', asyn
   assert.match(errorLogs[0], /^\[backend-smoke:ci-test\] FAILED: boom/);
 });
 
+test('runCli does not double-prefix errors that are already trace-prefixed', async () => {
+  const errorLogs = [];
+  const exitCode = await runCli(['--label', 'ci-test'], {
+    executeMain: async () => {
+      throw new Error('[backend-smoke:ci-test] some failure');
+    },
+    logError: (line) => errorLogs.push(String(line)),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(errorLogs.length, 1);
+  assert.equal(errorLogs[0], '[backend-smoke:ci-test] some failure');
+});
+
 test('runCli retries once on EADDRINUSE and then succeeds', async () => {
   const logs = [];
   const errorLogs = [];
@@ -612,6 +626,48 @@ test('main fails on readiness timeout and keeps bounded recent logs', async () =
         error.message.includes('[backend-smoke:timeout] Backend did not become HTTP-reachable') &&
         error.message.includes('stdout: line-250') &&
         !error.message.includes('stdout: line-0'),
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails on readiness timeout with HTTP status and reports last probe error', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    const child = createFakeChild();
+    let now = 0;
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 260,
+            pollIntervalMs: 1,
+            label: 'http-timeout',
+          },
+          {
+            fs,
+            spawn: () => child,
+            reserveLoopbackPort: async () => 6292,
+            fetchWithTimeout: async () => ({ ok: false, status: 503 }),
+            terminateChild: async () => {},
+            sleep: async () => {
+              child.stdout.emit('data', `line-${now}`);
+              now += 1;
+            },
+            now: () => now,
+            mkdtempSync: (prefix) => fs.mkdtempSync(prefix),
+            rmSync: (targetPath, options) => fs.rmSync(targetPath, options),
+            tmpdir: () => os.tmpdir(),
+          },
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('[backend-smoke:http-timeout] Backend did not become HTTP-reachable') &&
+        error.message.includes('HTTP 503'),
     );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });

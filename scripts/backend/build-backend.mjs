@@ -63,32 +63,62 @@ const resolveImportScannerPythonExecutable = () => {
 const IMPORT_SCANNER_TIMEOUT_MS = 30_000;
 const importScannerCache = new Map();
 
-const runImportScanner = (filePath) => {
-  let cacheKey = '';
+const buildScannerCacheKey = (filePath) => {
   try {
     const stat = fs.statSync(filePath);
-    cacheKey = `${filePath}:${stat.mtimeMs}:${stat.size}`;
+    return `${filePath}:${stat.mtimeMs}:${stat.size}`;
   } catch {
-    // Leave cacheKey empty when file metadata cannot be read.
+    return '';
   }
+};
 
-  if (cacheKey && importScannerCache.has(cacheKey)) {
-    return importScannerCache.get(cacheKey);
-  }
-
+const invokeScannerProcess = (filePath) => {
   const scannerPython = resolveImportScannerPythonExecutable();
-  const result = spawnSync(scannerPython, [importScannerScriptPath, filePath], {
+  return spawnSync(scannerPython, [importScannerScriptPath, filePath], {
     encoding: 'utf8',
     windowsHide: true,
     timeout: IMPORT_SCANNER_TIMEOUT_MS,
   });
+};
 
-  const warnFailure = (details) => {
-    console.warn(
-      `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
-    );
-    return [];
-  };
+const parseScannerOutput = (result) => {
+  if (result.error) {
+    return { ok: false, type: 'process', reason: result.error };
+  }
+
+  if (result.status !== 0) {
+    const details = result.stderr?.trim() || `exit code ${result.status}`;
+    return { ok: false, type: 'exit', reason: new Error(details) };
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout || '[]');
+    if (!Array.isArray(parsed)) {
+      throw new Error('scanner output is not an array');
+    }
+    return { ok: true, value: parsed };
+  } catch (error) {
+    return {
+      ok: false,
+      type: 'json',
+      reason: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+};
+
+const warnImportScannerFailure = (filePath, details) => {
+  console.warn(
+    `[build-backend] failed to scan imports for ${path.basename(filePath)}: ${details}`,
+  );
+};
+
+const runImportScanner = (filePath) => {
+  const cacheKey = buildScannerCacheKey(filePath);
+  if (cacheKey && importScannerCache.has(cacheKey)) {
+    return importScannerCache.get(cacheKey);
+  }
+
+  const result = invokeScannerProcess(filePath);
 
   if (result.error) {
     if (result.error.code === 'ETIMEDOUT') {
@@ -97,89 +127,153 @@ const runImportScanner = (filePath) => {
       );
       return [];
     }
-    return warnFailure(result.error.message || 'unknown process error');
-  }
-
-  if (result.status !== 0) {
-    const details = result.stderr?.trim() || `exit code ${result.status}`;
-    return warnFailure(details);
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout || '[]');
-    if (!Array.isArray(parsed)) {
-      throw new Error('scanner output is not an array');
-    }
-    if (cacheKey) {
-      importScannerCache.set(cacheKey, parsed);
-    }
-    return parsed;
-  } catch (error) {
-    console.warn(
-      `[build-backend] invalid import scanner output for ${path.basename(filePath)}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    warnImportScannerFailure(filePath, result.error.message || 'unknown process error');
     return [];
+  }
+
+  const parsedOutput = parseScannerOutput(result);
+  if (!parsedOutput.ok) {
+    if (parsedOutput.type === 'json') {
+      console.warn(
+        `[build-backend] invalid import scanner output for ${path.basename(filePath)}: ${parsedOutput.reason.message}`,
+      );
+    } else {
+      warnImportScannerFailure(filePath, parsedOutput.reason.message);
+    }
+    return [];
+  }
+
+  if (cacheKey) {
+    importScannerCache.set(cacheKey, parsedOutput.value);
+  }
+  return parsedOutput.value;
+};
+
+const addRootModule = (imports, relativeBareImports, name, fromRelativeBareImport = false) => {
+  if (typeof name !== 'string') {
+    return;
+  }
+
+  const rootModule = name.split('.')[0].trim();
+  if (!rootModule || rootModule === '*') {
+    return;
+  }
+
+  imports.add(rootModule);
+  if (fromRelativeBareImport) {
+    relativeBareImports.add(rootModule);
+  }
+};
+
+const handleImportDescriptor = (descriptor, imports, relativeBareImports) => {
+  if (typeof descriptor.module === 'string' && descriptor.module.trim()) {
+    addRootModule(imports, relativeBareImports, descriptor.module);
+  }
+};
+
+const handleFromDescriptor = (descriptor, imports, relativeBareImports) => {
+  const level = Number.isInteger(descriptor.level) ? descriptor.level : 0;
+  const moduleSpec = typeof descriptor.module === 'string' ? descriptor.module.trim() : '';
+  const names = Array.isArray(descriptor.names) ? descriptor.names : [];
+
+  if (level > 0) {
+    if (moduleSpec) {
+      addRootModule(imports, relativeBareImports, moduleSpec);
+      return;
+    }
+
+    for (const importedName of names) {
+      if (typeof importedName !== 'string') {
+        continue;
+      }
+      addRootModule(imports, relativeBareImports, importedName, true);
+    }
+    return;
+  }
+
+  if (moduleSpec) {
+    addRootModule(imports, relativeBareImports, moduleSpec);
   }
 };
 
 const extractImportedRootModules = (filePath) => {
   const imports = new Set();
   const relativeBareImports = new Set();
-  const descriptors = runImportScanner(filePath);
-
-  const addRoot = (name, fromRelativeBareImport = false) => {
-    if (typeof name !== 'string') {
-      return;
-    }
-    const rootModule = name.split('.')[0].trim();
-    if (!rootModule || rootModule === '*') {
-      return;
-    }
-    if (fromRelativeBareImport) {
-      relativeBareImports.add(rootModule);
-    }
-    imports.add(rootModule);
-  };
-
-  for (const descriptor of descriptors) {
+  for (const descriptor of runImportScanner(filePath)) {
     if (!descriptor || typeof descriptor !== 'object') {
       continue;
     }
 
     if (descriptor.kind === 'import') {
-      if (typeof descriptor.module === 'string' && descriptor.module.trim()) {
-        addRoot(descriptor.module);
-      }
+      handleImportDescriptor(descriptor, imports, relativeBareImports);
       continue;
     }
 
     if (descriptor.kind === 'from') {
-      const level = Number.isInteger(descriptor.level) ? descriptor.level : 0;
-      const moduleSpec = typeof descriptor.module === 'string' ? descriptor.module.trim() : '';
-      const names = Array.isArray(descriptor.names) ? descriptor.names : [];
-
-      if (level > 0) {
-        if (moduleSpec) {
-          addRoot(moduleSpec);
-          continue;
-        }
-
-        for (const importedName of names) {
-          if (typeof importedName !== 'string') {
-            continue;
-          }
-          addRoot(importedName, true);
-        }
-        continue;
-      }
-
-      if (moduleSpec) {
-        addRoot(moduleSpec);
-      }
+      handleFromDescriptor(descriptor, imports, relativeBareImports);
     }
   }
 
   return { imports, relativeBareImports };
+};
+
+const buildModuleCandidate = (resolvedSourceDir, entry) => {
+  if (entry.isFile() && path.extname(entry.name) === '.py') {
+    return {
+      name: path.basename(entry.name, '.py'),
+      relativePath: entry.name,
+      scanPath: path.join(resolvedSourceDir, entry.name),
+      isPackage: false,
+    };
+  }
+
+  if (!entry.isDirectory()) {
+    return null;
+  }
+
+  const initPath = path.join(resolvedSourceDir, entry.name, '__init__.py');
+  if (!fs.existsSync(initPath)) {
+    return null;
+  }
+
+  return {
+    name: entry.name,
+    relativePath: entry.name,
+    scanPath: initPath,
+    isPackage: true,
+  };
+};
+
+const choosePreferredModule = (existingModule, candidateModule) => {
+  if (!existingModule) {
+    return {
+      module: candidateModule,
+      warning: '',
+    };
+  }
+
+  if (existingModule.isPackage && !candidateModule.isPackage) {
+    return {
+      module: candidateModule,
+      warning:
+        `[build-backend] both module file and package found for "${candidateModule.name}", ` +
+        `preferring ${candidateModule.relativePath}`,
+    };
+  }
+
+  if (!existingModule.isPackage && candidateModule.isPackage) {
+    return {
+      module: existingModule,
+      warning:
+        `[build-backend] both module file and package found for "${candidateModule.name}", ` +
+        `preferring ${existingModule.relativePath}`,
+    };
+  }
+
+  return {
+    module: existingModule,
+    warning: '',
+  };
 };
 
 const listAvailableRootModules = (resolvedSourceDir) => {
@@ -190,47 +284,19 @@ const listAvailableRootModules = (resolvedSourceDir) => {
   const entries = fs.readdirSync(resolvedSourceDir, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (entry.isFile() && path.extname(entry.name) === '.py') {
-      const moduleName = path.basename(entry.name, '.py');
-      const existingModule = modules.get(moduleName);
-      if (existingModule?.isPackage) {
-        console.warn(
-          `[build-backend] both module file and package found for "${moduleName}", ` +
-            `preferring ${entry.name}`,
-        );
-      }
-      modules.set(moduleName, {
-        relativePath: entry.name,
-        scanPath: path.join(resolvedSourceDir, entry.name),
-        isPackage: false,
-      });
+    const candidateModule = buildModuleCandidate(resolvedSourceDir, entry);
+    if (!candidateModule) {
       continue;
     }
 
-    if (!entry.isDirectory()) {
-      continue;
+    const { module, warning } = choosePreferredModule(
+      modules.get(candidateModule.name),
+      candidateModule,
+    );
+    if (warning) {
+      console.warn(warning);
     }
-    const moduleName = entry.name;
-    const initPath = path.join(resolvedSourceDir, moduleName, '__init__.py');
-    if (!fs.existsSync(initPath)) {
-      continue;
-    }
-    const existingModule = modules.get(moduleName);
-    if (existingModule && !existingModule.isPackage) {
-      console.warn(
-        `[build-backend] both module file and package found for "${moduleName}", ` +
-          `preferring ${existingModule.relativePath}`,
-      );
-      continue;
-    }
-    if (existingModule?.isPackage) {
-      continue;
-    }
-    modules.set(moduleName, {
-      relativePath: moduleName,
-      scanPath: initPath,
-      isPackage: true,
-    });
+    modules.set(candidateModule.name, module);
   }
 
   return modules;
@@ -253,6 +319,44 @@ const logUnresolvedImports = (unresolvedImports, entryFile) => {
   );
 };
 
+const visitFileAndCollectImports = (currentFile) => {
+  if (!fs.existsSync(currentFile)) {
+    return null;
+  }
+  return extractImportedRootModules(currentFile);
+};
+
+const handleImportedModule = ({
+  importedModule,
+  availableModules,
+  relativeBareImports,
+  currentFile,
+  entryFile,
+  required,
+  queue,
+  unresolvedImports,
+}) => {
+  const moduleEntry = availableModules.get(importedModule);
+  if (!moduleEntry) {
+    if (!relativeBareImports.has(importedModule)) {
+      unresolvedImports.push({
+        file: path.basename(currentFile),
+        module: importedModule,
+      });
+    }
+    return;
+  }
+
+  if (moduleEntry.relativePath === entryFile) {
+    return;
+  }
+
+  if (!required.has(moduleEntry.relativePath)) {
+    required.add(moduleEntry.relativePath);
+    queue.push(moduleEntry.scanPath);
+  }
+};
+
 const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py') => {
   const availableModules = listAvailableRootModules(resolvedSourceDir);
   const required = new Set();
@@ -262,31 +366,27 @@ const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py'
 
   while (queue.length > 0) {
     const currentFile = queue.shift();
-    if (!currentFile || visitedFiles.has(currentFile) || !fs.existsSync(currentFile)) {
+    if (!currentFile || visitedFiles.has(currentFile)) {
       continue;
     }
     visitedFiles.add(currentFile);
-    const { imports: importedModules, relativeBareImports } = extractImportedRootModules(currentFile);
+    const importsInfo = visitFileAndCollectImports(currentFile);
+    if (!importsInfo) {
+      continue;
+    }
 
+    const { imports: importedModules, relativeBareImports } = importsInfo;
     for (const importedModule of importedModules) {
-      const moduleEntry = availableModules.get(importedModule);
-      if (!moduleEntry) {
-        if (relativeBareImports.has(importedModule)) {
-          continue;
-        }
-        unresolvedImports.push({
-          file: path.basename(currentFile),
-          module: importedModule,
-        });
-        continue;
-      }
-      if (moduleEntry.relativePath === entryFile) {
-        continue;
-      }
-      if (!required.has(moduleEntry.relativePath)) {
-        required.add(moduleEntry.relativePath);
-        queue.push(moduleEntry.scanPath);
-      }
+      handleImportedModule({
+        importedModule,
+        availableModules,
+        relativeBareImports,
+        currentFile,
+        entryFile,
+        required,
+        queue,
+        unresolvedImports,
+      });
     }
   }
 
