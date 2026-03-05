@@ -49,39 +49,115 @@ const prepareOutputDirs = () => {
   fs.mkdirSync(appDir, { recursive: true });
 };
 
-const extractImportedRootModules = (filePath) => {
+const extractImportedRootModules = (filePath, availableModules = null) => {
   const content = fs.readFileSync(filePath, 'utf8');
   const imports = new Set();
+  const parsingWarnings = [];
+  const lines = content.split(/\r?\n/);
 
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.split('#')[0].trim();
-    if (!line) {
-      continue;
+  const splitImportTargets = (value) =>
+    value
+      .replace(/[()]/g, ' ')
+      .split(',')
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .map((segment) => segment.split(/\s+as\s+/i)[0].trim())
+      .map((segment) => segment.replace(/\\\s*$/g, '').trim())
+      .filter(Boolean);
+
+  const parseImportStatement = (statement, lineNumber) => {
+    const normalizedStatement = statement.replace(/\\\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalizedStatement) {
+      return;
     }
 
-    const importMatch = line.match(/^import\s+(.+)$/);
+    const importMatch = normalizedStatement.match(/^import\s+(.+)$/);
     if (importMatch) {
-      for (const segmentRaw of importMatch[1].split(',')) {
-        const segment = segmentRaw.trim();
-        if (!segment) {
-          continue;
-        }
-        const modulePart = segment.split(/\s+as\s+/i)[0].trim();
+      for (const modulePart of splitImportTargets(importMatch[1])) {
         const rootModule = modulePart.split('.')[0].trim();
         if (rootModule) {
           imports.add(rootModule);
         }
       }
-      continue;
+      return;
     }
 
-    const fromImportMatch = line.match(/^from\s+([A-Za-z_][\w.]*)\s+import\s+/);
+    const fromImportMatch = normalizedStatement.match(/^from\s+([.A-Za-z_][\w.]*)\s+import\s+(.+)$/);
     if (fromImportMatch) {
-      const rootModule = fromImportMatch[1].split('.')[0].trim();
+      const moduleSpec = fromImportMatch[1].trim();
+      const importedPart = fromImportMatch[2].trim();
+      if (moduleSpec.startsWith('.')) {
+        const localModule = moduleSpec.replace(/^\.+/, '').split('.')[0].trim();
+        if (localModule) {
+          imports.add(localModule);
+          return;
+        }
+
+        for (const importedName of splitImportTargets(importedPart)) {
+          const candidateModule = importedName.split('.')[0].trim();
+          if (!candidateModule) {
+            continue;
+          }
+          if (!availableModules || availableModules.has(candidateModule)) {
+            imports.add(candidateModule);
+          }
+        }
+        return;
+      }
+
+      const rootModule = moduleSpec.split('.')[0].trim();
       if (rootModule) {
         imports.add(rootModule);
       }
+      return;
     }
+
+    parsingWarnings.push(
+      `unparsed import statement in ${path.basename(filePath)}:${lineNumber}: ${normalizedStatement}`,
+    );
+  };
+
+  let pendingStatement = '';
+  let pendingStartLine = 0;
+  let parenthesisDepth = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].split('#')[0].trim();
+    if (!line && !pendingStatement) {
+      continue;
+    }
+
+    if (!pendingStatement) {
+      if (!/^(import|from)\b/.test(line)) {
+        continue;
+      }
+      pendingStatement = line;
+      pendingStartLine = index + 1;
+      parenthesisDepth = (line.match(/\(/g) || []).length - (line.match(/\)/g) || []).length;
+    } else {
+      pendingStatement = `${pendingStatement} ${line}`.trim();
+      parenthesisDepth += (line.match(/\(/g) || []).length - (line.match(/\)/g) || []).length;
+    }
+
+    const hasLineContinuation = /\\\s*$/.test(line);
+    if (parenthesisDepth > 0 || hasLineContinuation) {
+      continue;
+    }
+
+    parseImportStatement(pendingStatement, pendingStartLine);
+    pendingStatement = '';
+    pendingStartLine = 0;
+    parenthesisDepth = 0;
+  }
+
+  if (pendingStatement) {
+    parsingWarnings.push(
+      `unterminated import statement in ${path.basename(filePath)}:${pendingStartLine}: ${pendingStatement}`,
+    );
+  }
+
+  if (parsingWarnings.length > 0) {
+    console.warn(`[build-backend] ${parsingWarnings.join('; ')}`);
   }
 
   return imports;
@@ -105,7 +181,7 @@ const resolveRequiredRootPythonFiles = (resolvedSourceDir, entryFile = 'main.py'
       continue;
     }
     visitedFiles.add(currentFile);
-    const importedModules = extractImportedRootModules(currentFile);
+    const importedModules = extractImportedRootModules(currentFile, availableModules);
 
     for (const importedModule of importedModules) {
       if (!availableModules.has(importedModule)) {

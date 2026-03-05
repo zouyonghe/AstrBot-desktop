@@ -137,7 +137,11 @@ const terminateChild = async (child, timeoutMs = 4_000) => {
     await sleep(100);
   }
   if (child.exitCode === null) {
-    child.kill('SIGKILL');
+    if (process.platform === 'win32') {
+      child.kill();
+    } else {
+      child.kill('SIGKILL');
+    }
   }
 };
 
@@ -229,7 +233,7 @@ const main = async () => {
 
       try {
         const response = await fetchWithTimeout(backendUrl, 1_200);
-        if (response.status >= 200 && response.status < 500) {
+        if (response.ok) {
           ready = true;
           break;
         }
