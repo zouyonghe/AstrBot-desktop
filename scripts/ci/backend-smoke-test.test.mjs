@@ -48,6 +48,29 @@ const createFakeChild = () => {
   return child;
 };
 
+const createPreflightRuntime = (overrides = {}) => {
+  let spawnCalled = false;
+  const runtime = {
+    fs,
+    spawn: () => {
+      spawnCalled = true;
+      throw new Error('spawn should not be called during preflight validation');
+    },
+    reserveLoopbackPort: async () => {
+      throw new Error('reserveLoopbackPort should not be called during preflight validation');
+    },
+    fetchWithTimeout: async () => ({ ok: false, status: 500 }),
+    terminateChild: async () => {},
+    sleep: async () => {},
+    now: () => 0,
+    mkdtempSync: (prefix) => fs.mkdtempSync(prefix),
+    rmSync: (targetPath, options) => fs.rmSync(targetPath, options),
+    tmpdir: () => os.tmpdir(),
+    ...overrides,
+  };
+  return { runtime, wasSpawnCalled: () => spawnCalled };
+};
+
 test('parseCliOptions returns default values when no args provided', () => {
   const options = parseCliOptions([]);
   assert.equal(options.backendDir, path.resolve('resources/backend'));
@@ -214,6 +237,212 @@ test('runCli prints usage and returns 0 for --help', async () => {
   assert.equal(errorLogs.length, 0);
   assert.equal(logs.length, 1);
   assert.match(logs[0], /Usage: node scripts\/ci\/backend-smoke-test\.mjs \[options\]/);
+});
+
+test('main fails when backend directory is missing', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    const missingBackendDir = path.join(fixture.root, 'missing-backend');
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main({
+          backendDir: missingBackendDir,
+          webuiDir: fixture.webuiDir,
+          startupTimeoutMs: 50,
+          pollIntervalMs: 1,
+          label: 'missing-backend',
+        }, runtime),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Backend directory not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when webui directory is missing', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    const missingWebuiDir = path.join(fixture.root, 'missing-webui');
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: missingWebuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'missing-webui',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('WebUI directory not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when runtime-manifest.json is missing', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    await rm(path.join(fixture.backendDir, 'runtime-manifest.json'), { force: true });
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'missing-manifest',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Backend runtime manifest not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when launch_backend.py is missing', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    await rm(path.join(fixture.backendDir, 'launch_backend.py'), { force: true });
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'missing-launcher',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Backend launcher not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when app/main.py is missing', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    await rm(path.join(fixture.backendDir, 'app', 'main.py'), { force: true });
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'missing-app-main',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Backend app main.py not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when manifest.python is invalid', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    const runtimeManifestPath = path.join(fixture.backendDir, 'runtime-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8'));
+    manifest.python = 42;
+    fs.writeFileSync(runtimeManifestPath, JSON.stringify(manifest), 'utf8');
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'invalid-manifest-python',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Invalid runtime manifest python entry'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('main fails when manifest.python points to a non-existent executable', async () => {
+  const fixture = await createFixtureLayout();
+  try {
+    const runtimeManifestPath = path.join(fixture.backendDir, 'runtime-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8'));
+    manifest.python = 'python/not-found';
+    fs.writeFileSync(runtimeManifestPath, JSON.stringify(manifest), 'utf8');
+    const { runtime, wasSpawnCalled } = createPreflightRuntime();
+
+    await assert.rejects(
+      () =>
+        main(
+          {
+            backendDir: fixture.backendDir,
+            webuiDir: fixture.webuiDir,
+            startupTimeoutMs: 50,
+            pollIntervalMs: 1,
+            label: 'missing-runtime-python',
+          },
+          runtime,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes('Runtime python executable not found'),
+    );
+
+    assert.equal(wasSpawnCalled(), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('main succeeds on readiness and always runs terminate/cleanup', async () => {

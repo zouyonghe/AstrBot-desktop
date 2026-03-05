@@ -46,7 +46,15 @@ def main() -> int:
         print(f"file not found: {file_path}", file=sys.stderr)
         return 2
 
-    descriptors = scan_imports(file_path)
+    try:
+        descriptors = scan_imports(file_path)
+    except (UnicodeDecodeError, SyntaxError, OSError) as error:
+        print(
+            f"{file_path.name}: failed to scan imports: {error}",
+            file=sys.stderr,
+        )
+        return 1
+
     print(json.dumps(descriptors, ensure_ascii=True))
     return 0
 
