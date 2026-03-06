@@ -5,29 +5,59 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from .lib.artifact_arch import normalize_arch_alias
 
-from artifact_arch import normalize_arch_alias
+CANONICAL_VERSION_PATTERN = r"[^_]+"
+LEGACY_VERSION_PATTERN = r".+?"
+CANONICAL_ARCH_PATTERN = r"[^_]+"
+LEGACY_ARCH_PATTERN = r"[^.]+"
+SHORT_SHA_PATTERN = r"[0-9a-fA-F]{8}"
+CANONICAL_NIGHTLY_SUFFIX_PATTERN = rf"(?:_nightly_{SHORT_SHA_PATTERN})?"
 
-WINDOWS_PATTERNS = (
-    re.compile(
-        r"(?P<name>.+?)_(?P<version>[^_]+)_windows_(?P<arch>[^_]+)(?:-setup|_setup(?:_nightly_[0-9a-fA-F]{8})?)\.exe$"
-    ),
-    re.compile(r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64)-setup\.exe$"),
-)
-MACOS_ARCHIVE_PATTERNS = (
-    re.compile(
-        r"(?P<name>.+?)_(?P<version>[^_]+)_macos_(?P<arch>[^_]+)(?:_nightly_[0-9a-fA-F]{8})?\.app\.tar\.gz$"
-    ),
-    re.compile(r"(?P<name>.+?)_(?P<version>.+?)_macos_(?P<arch>[^.]+)\.app\.tar\.gz$"),
-    re.compile(
-        r"(?P<name>.+?)_(?P<version>[^_]+)_macos_(?P<arch>[^_]+)(?:_nightly_[0-9a-fA-F]{8})?\.zip$"
-    ),
-    re.compile(r"(?P<name>.+?)_(?P<version>.+?)_macos_(?P<arch>[^.]+)\.zip$"),
-)
+
+def compile_pattern(pattern: str) -> re.Pattern[str]:
+    return re.compile(pattern)
+
+
+def build_canonical_platform_pattern(platform: str, artifact_suffix: str) -> re.Pattern[str]:
+    return compile_pattern(
+        rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_{platform}_(?P<arch>{CANONICAL_ARCH_PATTERN}){artifact_suffix}$"
+    )
+
+
+def build_legacy_platform_pattern(platform: str, artifact_suffix: str) -> re.Pattern[str]:
+    return compile_pattern(
+        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_{platform}_(?P<arch>{LEGACY_ARCH_PATTERN}){artifact_suffix}$"
+    )
+
+
+def build_windows_patterns() -> tuple[re.Pattern[str], ...]:
+    return (
+        build_canonical_platform_pattern(
+            "windows", rf"(?:-setup|_setup{CANONICAL_NIGHTLY_SUFFIX_PATTERN})\.exe"
+        ),
+        compile_pattern(
+            rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_(?P<arch>x64|amd64|arm64)-setup\.exe$"
+        ),
+    )
+
+
+def build_macos_archive_patterns() -> tuple[re.Pattern[str], ...]:
+    patterns: list[re.Pattern[str]] = []
+    for archive_extension in (r"\.app\.tar\.gz", r"\.zip"):
+        patterns.append(
+            build_canonical_platform_pattern(
+                "macos", rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}{archive_extension}"
+            )
+        )
+        patterns.append(build_legacy_platform_pattern("macos", archive_extension))
+    return tuple(patterns)
+
+
+WINDOWS_PATTERNS = build_windows_patterns()
+MACOS_ARCHIVE_PATTERNS = build_macos_archive_patterns()
 
 
 def read_signature(path: Path) -> str:

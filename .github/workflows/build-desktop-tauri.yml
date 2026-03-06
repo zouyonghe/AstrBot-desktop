@@ -551,7 +551,7 @@ jobs:
               normalize_args+=(--strict-unmatched)
               ;;
           esac
-          python3 scripts/ci/normalize-release-artifact-filenames.py "${normalize_args[@]}"
+          python3 -m scripts.ci.normalize_release_artifact_filenames "${normalize_args[@]}"
 
       - name: Validate artifact filename uniqueness
         shell: bash
@@ -566,7 +566,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci/generate-tauri-latest-json.py \
+          python3 -m scripts.ci.generate_tauri_latest_json \
             --artifacts-root release-artifacts \
             --repo "${GITHUB_REPOSITORY}" \
             --tag "${RELEASE_TAG}" \

@@ -9,11 +9,11 @@ import { test } from 'node:test';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..', '..');
-const normalizeScript = path.join(projectRoot, 'scripts/ci/normalize-release-artifact-filenames.py');
-const generateScript = path.join(projectRoot, 'scripts/ci/generate-tauri-latest-json.py');
+const normalizeModule = 'scripts.ci.normalize_release_artifact_filenames';
+const generateModule = 'scripts.ci.generate_tauri_latest_json';
 
-const runPythonRaw = (scriptPath, args, cwd = projectRoot) =>
-  spawnSync('python3', [scriptPath, ...args], {
+const runPythonRaw = (moduleName, args, cwd = projectRoot) =>
+  spawnSync('python3', ['-m', moduleName, ...args], {
     cwd,
     encoding: 'utf8',
   });
@@ -24,7 +24,7 @@ const runPython = (scriptPath, args, cwd = projectRoot) => {
   if (result.status !== 0) {
     throw new Error(
       [
-        `Command failed: python3 ${path.relative(projectRoot, scriptPath)} ${args.join(' ')}`,
+        `Command failed: python3 -m ${moduleName} ${args.join(' ')}`,
         result.stdout.trim(),
         result.stderr.trim(),
       ]
@@ -36,19 +36,22 @@ const runPython = (scriptPath, args, cwd = projectRoot) => {
   return result;
 };
 
+test('package entrypoints are invokable with python -m', () => {
+  const normalizeResult = runPythonRaw(normalizeModule, ['--help']);
+  const generateResult = runPythonRaw(generateModule, ['--help']);
+
+  assert.equal(normalizeResult.status, 0, normalizeResult.stderr);
+  assert.equal(generateResult.status, 0, generateResult.stderr);
+});
+
 test('detect_artifact_extension prefers the longest matching suffix at call time', () => {
   const result = spawnSync(
     'python3',
     [
       '-c',
       `
-import importlib.util
 import pathlib
-
-script_path = pathlib.Path(${JSON.stringify(normalizeScript)})
-spec = importlib.util.spec_from_file_location('normalize_release_artifacts', script_path)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+from scripts.ci import normalize_release_artifact_filenames as module
 module.ARTIFACT_EXTENSIONS = ('.sig', '.app.tar.gz.sig')
 print(module.detect_artifact_extension(pathlib.Path('AstrBot.app.tar.gz.sig')) or '')
 `,
@@ -60,7 +63,7 @@ print(module.detect_artifact_extension(pathlib.Path('AstrBot.app.tar.gz.sig')) o
   assert.equal(result.stdout.trim(), '.app.tar.gz.sig');
 });
 
-test('generate-tauri-latest-json rejects unsupported signature artifacts', async () => {
+test('generate_tauri_latest_json rejects unsupported signature artifacts', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
 
   try {
@@ -74,7 +77,7 @@ test('generate-tauri-latest-json rejects unsupported signature artifacts', async
     );
     await writeFile(path.join(artifactsDir, 'unexpected.sig'), 'bad-signature', 'utf8');
 
-    const result = runPythonRaw(generateScript, [
+    const result = runPythonRaw(generateModule, [
       '--artifacts-root',
       artifactsDir,
       '--repo',
@@ -87,7 +90,7 @@ test('generate-tauri-latest-json rejects unsupported signature artifacts', async
       path.join(artifactsDir, 'latest.json'),
     ]);
 
-    assert.notEqual(result.status, 0, 'expected generate-tauri-latest-json.py to fail');
+    assert.notEqual(result.status, 0, 'expected scripts.ci.generate_tauri_latest_json to fail');
     assert.match(result.stderr, /unexpected\.sig|unsupported/i);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -125,7 +128,7 @@ test('release artifact normalization keeps updater signatures aligned for latest
     );
 
     runPython(
-      normalizeScript,
+      normalizeModule,
       ['--root', artifactsDir, '--build-mode', 'nightly', '--source-git-ref', sourceSha],
       projectRoot,
     );
@@ -144,7 +147,7 @@ test('release artifact normalization keeps updater signatures aligned for latest
 
     const outputPath = path.join(artifactsDir, 'latest.json');
     runPython(
-      generateScript,
+      generateModule,
       [
         '--artifacts-root',
         artifactsDir,

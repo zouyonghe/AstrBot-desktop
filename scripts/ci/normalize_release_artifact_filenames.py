@@ -5,11 +5,8 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
-import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-
-from artifact_arch import normalize_arch_alias
+from .lib.artifact_arch import normalize_arch_alias
 
 NIGHTLY_DATE_PATTERN = re.compile(r"(?:-|_)nightly[._-][0-9]{8}[._-][0-9a-fA-F]{7,40}")
 NIGHTLY_HASH_PATTERN = re.compile(r"(?:-|_)nightly[-_][0-9a-fA-F]{7,40}")

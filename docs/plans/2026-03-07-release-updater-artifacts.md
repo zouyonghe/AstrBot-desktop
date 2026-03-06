@@ -22,8 +22,8 @@
 ### Task 2: Fix CI scripts for canonical updater artifact names
 
 **Files:**
-- Modify: `scripts/ci/normalize-release-artifact-filenames.py`
-- Modify: `scripts/ci/generate-tauri-latest-json.py`
+- Modify: `scripts/ci/normalize_release_artifact_filenames.py`
+- Modify: `scripts/ci/generate_tauri_latest_json.py`
 
 **Step 1:** 让规范化脚本支持 `.sig` 与 macOS `.app.tar.gz` updater bundle。
 
