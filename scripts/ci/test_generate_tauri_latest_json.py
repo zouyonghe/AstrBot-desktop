@@ -37,6 +37,14 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
         self.assertEqual(MODULE.normalize_arch('aarch64'), 'arm64')
         self.assertEqual(MODULE.normalize_arch('arm64'), 'arm64')
 
+    def test_platform_key_for_windows_unsupported_arch(self):
+        with self.assertRaisesRegex(ValueError, r'Unsupported Windows arch: ppc64le'):
+            MODULE.platform_key_for_windows('ppc64le')
+
+    def test_platform_key_for_macos_unsupported_arch(self):
+        with self.assertRaisesRegex(ValueError, r'Unsupported macOS arch: ppc64le'):
+            MODULE.platform_key_for_macos('ppc64le')
+
     def test_derive_nightly_filename_suffix_validation(self):
         self.assertEqual(
             MODULE.derive_nightly_filename_suffix('4.29.0', 'stable'),

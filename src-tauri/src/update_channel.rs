@@ -134,12 +134,20 @@ pub(crate) fn resolve_manifest_endpoint_from_sources(
         }
     }
 
-    Err(format!(
-        "Missing updater endpoint for '{}' channel. Configure plugins.updater.channelEndpoints.{} or set {}.",
-        channel.config_key(),
-        channel.config_key(),
-        channel.env_override_key()
-    ))
+    let message = match channel {
+        UpdateChannel::Stable => format!(
+            "Missing updater endpoint for 'stable' channel. Configure plugins.updater.channelEndpoints.stable, plugins.updater.endpoints[0], or set {}.",
+            channel.env_override_key()
+        ),
+        UpdateChannel::Nightly => format!(
+            "Missing updater endpoint for '{}' channel. Configure plugins.updater.channelEndpoints.{} or set {}.",
+            channel.config_key(),
+            channel.config_key(),
+            channel.env_override_key()
+        ),
+    };
+
+    Err(message)
 }
 
 pub(crate) fn resolve_manifest_endpoint(
@@ -479,6 +487,27 @@ mod tests {
         .expect("stable endpoint should resolve");
 
         assert_eq!(stable, "https://config.example/stable-fallback.json");
+    }
+
+
+    #[test]
+    fn resolve_manifest_endpoint_reports_stable_fallback_in_error() {
+        let updater_config = json!({});
+
+        let error = resolve_manifest_endpoint_from_sources(
+            UpdateChannel::Stable,
+            updater_config.as_object().expect("object config"),
+            None,
+        )
+        .expect_err("stable endpoint should be missing");
+
+        assert_eq!(
+            error,
+            format!(
+                "Missing updater endpoint for 'stable' channel. Configure plugins.updater.channelEndpoints.stable, plugins.updater.endpoints[0], or set {}.",
+                UpdateChannel::Stable.env_override_key()
+            )
+        );
     }
 
     #[test]
