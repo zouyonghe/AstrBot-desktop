@@ -253,8 +253,9 @@ mod tests {
                 self.index += 1;
                 match chunk {
                     Ok(bytes) => {
-                        buf[..bytes.len()].copy_from_slice(bytes);
-                        Ok(bytes.len())
+                        let n = bytes.len().min(buf.len());
+                        buf[..n].copy_from_slice(&bytes[..n]);
+                        Ok(n)
                     }
                     Err(kind) => Err(std::io::Error::from(kind)),
                 }
