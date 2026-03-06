@@ -431,6 +431,229 @@ const prepareRuntimeExecutable = (runtimeSourceReal) => {
   return runtimePython;
 };
 
+const removePathIfExists = (candidatePath) => {
+  if (!fs.existsSync(candidatePath)) {
+    return false;
+  }
+  fs.rmSync(candidatePath, { recursive: true, force: true });
+  return true;
+};
+
+const removeFilesByPrefix = (directory, prefixes) => {
+  if (!fs.existsSync(directory)) {
+    return 0;
+  }
+  let removedCount = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (!prefixes.some((prefix) => entry.name.startsWith(prefix))) {
+      continue;
+    }
+    fs.rmSync(path.join(directory, entry.name), { force: true });
+    removedCount += 1;
+  }
+  return removedCount;
+};
+
+const walkFilesRecursively = (rootDir, predicate) => {
+  if (!fs.existsSync(rootDir)) {
+    return [];
+  }
+  const stack = [rootDir];
+  const collected = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && predicate(fullPath, entry.name)) {
+        collected.push(fullPath);
+      }
+    }
+  }
+  return collected;
+};
+
+const walkDirectoriesRecursively = (rootDir, predicate) => {
+  if (!fs.existsSync(rootDir)) {
+    return [];
+  }
+  const stack = [rootDir];
+  const collected = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const fullPath = path.join(current, entry.name);
+      if (predicate(fullPath, entry.name)) {
+        collected.push(fullPath);
+      }
+      stack.push(fullPath);
+    }
+  }
+  return collected;
+};
+
+const pruneLinuxTkinterRuntime = () => {
+  if (process.platform !== 'linux') {
+    return;
+  }
+
+  const runtimeLibDir = path.join(runtimeDir, 'lib');
+  if (!fs.existsSync(runtimeLibDir)) {
+    return;
+  }
+
+  let removedCount = 0;
+
+  // Tk/Tcl artifacts are not required by the desktop backend and can break
+  // AppImage dependency resolution on some Linux hosts.
+  for (const entry of fs.readdirSync(runtimeLibDir, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (!entry.name.startsWith('libtcl') && !entry.name.startsWith('libtk')) {
+      continue;
+    }
+    fs.rmSync(path.join(runtimeLibDir, entry.name), { force: true });
+    removedCount += 1;
+  }
+
+  const removableDirs = ['tcl8', 'tcl9', 'tk8', 'tk9', 'itcl'];
+  for (const entry of fs.readdirSync(runtimeLibDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (!removableDirs.some((prefix) => entry.name.startsWith(prefix))) {
+      continue;
+    }
+    if (removePathIfExists(path.join(runtimeLibDir, entry.name))) {
+      removedCount += 1;
+    }
+  }
+
+  for (const entry of fs.readdirSync(runtimeLibDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith('python')) {
+      continue;
+    }
+    const libDynloadDir = path.join(runtimeLibDir, entry.name, 'lib-dynload');
+    removedCount += removeFilesByPrefix(libDynloadDir, ['_tkinter']);
+  }
+
+  if (removedCount > 0) {
+    console.log(`[build-backend] removed ${removedCount} tkinter/tcl runtime artifact(s) for Linux AppImage compatibility.`);
+  }
+};
+
+const patchLinuxRuntimeRpaths = () => {
+  if (process.platform !== 'linux') {
+    return;
+  }
+
+  const patchelfProbe = spawnSync('patchelf', ['--version'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (patchelfProbe.error || patchelfProbe.status !== 0) {
+    console.warn('[build-backend] patchelf is unavailable; skipping Linux runtime rpath normalization.');
+    return;
+  }
+
+  const runtimeLibDir = path.join(runtimeDir, 'lib');
+  const pythonLibDirs = fs.existsSync(runtimeLibDir)
+    ? fs
+        .readdirSync(runtimeLibDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith('python'))
+        .map((entry) => path.join(runtimeLibDir, entry.name))
+    : [];
+
+  const sitePackagesRoots = pythonLibDirs
+    .map((pythonDir) => path.join(pythonDir, 'site-packages'))
+    .filter((sitePackagesDir) => fs.existsSync(sitePackagesDir));
+  const libsDirsBySitePackages = new Map();
+  for (const sitePackagesRoot of sitePackagesRoots) {
+    const libsDirs = walkDirectoriesRecursively(
+      sitePackagesRoot,
+      (_fullPath, dirName) => dirName.endsWith('.libs'),
+    );
+    libsDirsBySitePackages.set(sitePackagesRoot, libsDirs);
+  }
+
+  const soFiles = walkFilesRecursively(
+    runtimeDir,
+    (_fullPath, fileName) => fileName.endsWith('.so') || fileName.includes('.so.'),
+  );
+
+  let patchedCount = 0;
+  for (const soFile of soFiles) {
+    const printRpathResult = spawnSync('patchelf', ['--print-rpath', soFile], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (printRpathResult.error || printRpathResult.status !== 0) {
+      continue;
+    }
+
+    const searchEntries = [
+      '$ORIGIN',
+      '$ORIGIN/..',
+      '$ORIGIN/../..',
+      '$ORIGIN/../../..',
+      '$ORIGIN/../../../..',
+      '$ORIGIN/../.libs',
+    ];
+
+    for (const sitePackagesRoot of sitePackagesRoots) {
+      if (!soFile.startsWith(`${sitePackagesRoot}${path.sep}`)) {
+        continue;
+      }
+      const libsDirs = libsDirsBySitePackages.get(sitePackagesRoot) || [];
+      for (const libsDir of libsDirs) {
+        const relativePath = path.relative(path.dirname(soFile), libsDir);
+        if (!relativePath || relativePath === '.') {
+          searchEntries.push('$ORIGIN');
+          continue;
+        }
+        if (relativePath.startsWith('..') || !path.isAbsolute(relativePath)) {
+          searchEntries.push(`$ORIGIN/${relativePath.split(path.sep).join('/')}`);
+        }
+      }
+      break;
+    }
+
+    const existingRpathEntries = (printRpathResult.stdout || '')
+      .trim()
+      .split(':')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const finalEntries = Array.from(new Set([...existingRpathEntries, ...searchEntries]));
+    const setRpathResult = spawnSync(
+      'patchelf',
+      ['--set-rpath', finalEntries.join(':'), soFile],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    if (!setRpathResult.error && setRpathResult.status === 0) {
+      patchedCount += 1;
+    }
+  }
+
+  if (patchedCount > 0) {
+    console.log(
+      `[build-backend] normalized rpath for ${patchedCount} Linux runtime shared object(s) to stabilize AppImage dependency resolution.`,
+    );
+  }
+};
+
 const writeLauncherScript = () => {
   if (!fs.existsSync(launcherTemplatePath)) {
     throw new Error(`Launcher template does not exist: ${launcherTemplatePath}`);
@@ -590,6 +813,8 @@ const main = () => {
   copyAppSources(resolvedSourceDir);
   const runtimePython = prepareRuntimeExecutable(runtimeSourceReal);
   installRuntimeDependencies(runtimePython);
+  pruneLinuxTkinterRuntime();
+  patchLinuxRuntimeRpaths();
   writeLauncherScript();
   writeRuntimeManifest(runtimePython);
 

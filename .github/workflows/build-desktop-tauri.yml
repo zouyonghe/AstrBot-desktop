@@ -203,6 +203,8 @@ jobs:
           ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          NO_STRIP: '1'
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -210,10 +212,10 @@ jobs:
           set -euo pipefail
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" ]]; then
             echo "TAURI signing secrets detected; building deb, rpm, and AppImage bundles."
-            cargo tauri build --bundles deb,rpm,appimage
+            cargo tauri build -v --bundles deb,rpm,appimage
           else
             echo "TAURI signing secrets missing; building deb and rpm bundles only."
-            cargo tauri build --bundles deb,rpm
+            cargo tauri build -v --bundles deb,rpm
           fi
 
       - name: Smoke test backend startup (Linux)
