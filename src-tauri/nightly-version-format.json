@@ -1,0 +1,13 @@
+{
+  "canonicalFormat": "<base>-nightly.<YYYYMMDD>.<sha8>",
+  "validExamples": [
+    "4.29.0-nightly.20260307.abcd1234",
+    "4.19.2-nightly.20260306.61648ebe"
+  ],
+  "invalidExamples": [
+    "4.29.0-nightly.20260307.zzzzzzzz",
+    "4.29.0-nightly.2026037.abcd1234",
+    "4.29.0-nightly.20260307.abcd123",
+    "4.29.0-nightly.abcd1234"
+  ]
+}

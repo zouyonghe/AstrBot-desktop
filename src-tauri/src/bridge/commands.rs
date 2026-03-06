@@ -32,8 +32,12 @@ fn build_channel_aware_updater(
     app_handle: &AppHandle,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     let preferred_channel = resolve_update_channel(app_handle);
-    let endpoint = Url::parse(preferred_channel.manifest_url())
-        .map_err(|error| format!("Invalid updater endpoint: {error}"))?;
+    let raw_endpoint = update_channel::resolve_manifest_endpoint(
+        &app_handle.config().plugins.0,
+        preferred_channel,
+    )?;
+    let endpoint =
+        Url::parse(&raw_endpoint).map_err(|error| format!("Invalid updater endpoint: {error}"))?;
 
     app_handle
         .updater_builder()

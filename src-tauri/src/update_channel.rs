@@ -2,16 +2,19 @@ use semver::{BuildMetadata, Prerelease, Version};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
 };
 
 const UPDATE_CHANNEL_FIELD: &str = "updateChannel";
 const NIGHTLY_IDENTIFIER: &str = "nightly";
-const STABLE_MANIFEST_URL: &str =
-    "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest/download/latest-stable.json";
-const NIGHTLY_MANIFEST_URL: &str =
-    "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/latest-nightly.json";
+const UPDATER_PLUGIN_KEY: &str = "updater";
+const CHANNEL_ENDPOINTS_KEY: &str = "channelEndpoints";
+const ENDPOINTS_KEY: &str = "endpoints";
+const STABLE_ENDPOINT_ENV: &str = "ASTRBOT_DESKTOP_UPDATER_STABLE_ENDPOINT";
+const NIGHTLY_ENDPOINT_ENV: &str = "ASTRBOT_DESKTOP_UPDATER_NIGHTLY_ENDPOINT";
+// Canonical nightly version format lives in `src-tauri/nightly-version-format.json`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -29,10 +32,17 @@ impl UpdateChannel {
         }
     }
 
-    pub(crate) fn manifest_url(self) -> &'static str {
+    pub(crate) fn config_key(self) -> &'static str {
         match self {
-            Self::Stable => STABLE_MANIFEST_URL,
-            Self::Nightly => NIGHTLY_MANIFEST_URL,
+            Self::Stable => "stable",
+            Self::Nightly => "nightly",
+        }
+    }
+
+    pub(crate) fn env_override_key(self) -> &'static str {
+        match self {
+            Self::Stable => STABLE_ENDPOINT_ENV,
+            Self::Nightly => NIGHTLY_ENDPOINT_ENV,
         }
     }
 }
@@ -78,6 +88,79 @@ fn base_version(version: &Version) -> Version {
     base
 }
 
+fn non_empty_string(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn configured_channel_endpoint(
+    updater_config: &Map<String, Value>,
+    channel: UpdateChannel,
+) -> Option<String> {
+    updater_config
+        .get(CHANNEL_ENDPOINTS_KEY)
+        .and_then(Value::as_object)
+        .and_then(|channels| channels.get(channel.config_key()))
+        .and_then(Value::as_str)
+        .and_then(|value| non_empty_string(Some(value)))
+}
+
+pub(crate) fn resolve_manifest_endpoint_from_sources(
+    channel: UpdateChannel,
+    updater_config: &Map<String, Value>,
+    env_override: Option<&str>,
+) -> Result<String, String> {
+    if let Some(endpoint) = non_empty_string(env_override) {
+        return Ok(endpoint);
+    }
+
+    if let Some(endpoint) = configured_channel_endpoint(updater_config, channel) {
+        return Ok(endpoint);
+    }
+
+    if channel == UpdateChannel::Stable {
+        if let Some(endpoint) = updater_config
+            .get(ENDPOINTS_KEY)
+            .and_then(Value::as_array)
+            .and_then(|endpoints| endpoints.first())
+            .and_then(Value::as_str)
+            .and_then(|value| non_empty_string(Some(value)))
+        {
+            return Ok(endpoint);
+        }
+    }
+
+    Err(format!(
+        "Missing updater endpoint for '{}' channel. Configure plugins.updater.channelEndpoints.{} or set {}.",
+        channel.config_key(),
+        channel.config_key(),
+        channel.env_override_key()
+    ))
+}
+
+pub(crate) fn resolve_manifest_endpoint(
+    plugins_config: &HashMap<String, Value>,
+    channel: UpdateChannel,
+) -> Result<String, String> {
+    let updater_config = plugins_config
+        .get(UPDATER_PLUGIN_KEY)
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            format!(
+                "Missing plugins.{} configuration for '{}' channel updater resolution.",
+                UPDATER_PLUGIN_KEY,
+                channel.config_key()
+            )
+        })?;
+
+    let env_override = env::var(channel.env_override_key()).ok();
+    resolve_manifest_endpoint_from_sources(channel, updater_config, env_override.as_deref())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NightlyVersionInfo {
     base: Version,
@@ -92,11 +175,21 @@ fn parse_nightly_version_info(version: &Version) -> Option<NightlyVersionInfo> {
         return None;
     }
 
-    let date = identifiers.next()?.parse::<u32>().ok()?;
-    let hash = identifiers.next()?.to_string();
-    if hash.is_empty() {
+    let date_raw = identifiers.next()?;
+    let hash_raw = identifiers.next()?;
+    if identifiers.next().is_some() {
         return None;
     }
+
+    if date_raw.len() != 8 || !date_raw.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    if hash_raw.len() != 8 || !hash_raw.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let date = date_raw.parse::<u32>().ok()?;
+    let hash = hash_raw.to_ascii_lowercase();
 
     Some(NightlyVersionInfo {
         base: base_version(version),
@@ -252,11 +345,26 @@ pub(crate) fn should_offer_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+    use serde_json::json;
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NightlyVersionFormatSpec {
+        canonical_format: String,
+        valid_examples: Vec<String>,
+        invalid_examples: Vec<String>,
+    }
+
+    fn nightly_version_format_spec() -> NightlyVersionFormatSpec {
+        serde_json::from_str(include_str!("../nightly-version-format.json"))
+            .expect("nightly version format spec should parse")
+    }
 
     fn version(raw: &str) -> Version {
         Version::parse(raw).expect("version should parse")
@@ -287,6 +395,86 @@ mod tests {
             infer_channel_from_version(&version("4.29.0")),
             UpdateChannel::Stable
         );
+    }
+
+    #[test]
+    fn parse_nightly_version_info_matches_shared_examples() {
+        let spec = nightly_version_format_spec();
+        assert_eq!(spec.canonical_format, "<base>-nightly.<YYYYMMDD>.<sha8>");
+
+        for raw in spec.valid_examples {
+            let parsed = Version::parse(&raw).expect("valid nightly version should parse");
+            assert!(parse_nightly_version_info(&parsed).is_some(), "{raw}");
+        }
+
+        for raw in spec.invalid_examples {
+            let parsed = Version::parse(&raw)
+                .expect("invalid nightly example should still be semver-parseable");
+            assert!(parse_nightly_version_info(&parsed).is_none(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn resolve_manifest_endpoint_prefers_environment_override() {
+        let updater_config = json!({
+            "channelEndpoints": {
+                "stable": "https://config.example/stable.json",
+                "nightly": "https://config.example/nightly.json"
+            },
+            "endpoints": ["https://config.example/stable.json"]
+        });
+
+        let endpoint = resolve_manifest_endpoint_from_sources(
+            UpdateChannel::Nightly,
+            updater_config.as_object().expect("object config"),
+            Some("https://env.example/nightly.json"),
+        )
+        .expect("nightly endpoint should resolve");
+
+        assert_eq!(endpoint, "https://env.example/nightly.json");
+    }
+
+    #[test]
+    fn resolve_manifest_endpoint_reads_channel_specific_config() {
+        let updater_config = json!({
+            "channelEndpoints": {
+                "stable": "https://config.example/stable.json",
+                "nightly": "https://config.example/nightly.json"
+            },
+            "endpoints": ["https://config.example/stable-fallback.json"]
+        });
+
+        let stable = resolve_manifest_endpoint_from_sources(
+            UpdateChannel::Stable,
+            updater_config.as_object().expect("object config"),
+            None,
+        )
+        .expect("stable endpoint should resolve");
+        let nightly = resolve_manifest_endpoint_from_sources(
+            UpdateChannel::Nightly,
+            updater_config.as_object().expect("object config"),
+            None,
+        )
+        .expect("nightly endpoint should resolve");
+
+        assert_eq!(stable, "https://config.example/stable.json");
+        assert_eq!(nightly, "https://config.example/nightly.json");
+    }
+
+    #[test]
+    fn resolve_manifest_endpoint_uses_stable_endpoint_fallback_array() {
+        let updater_config = json!({
+            "endpoints": ["https://config.example/stable-fallback.json"]
+        });
+
+        let stable = resolve_manifest_endpoint_from_sources(
+            UpdateChannel::Stable,
+            updater_config.as_object().expect("object config"),
+            None,
+        )
+        .expect("stable endpoint should resolve");
+
+        assert_eq!(stable, "https://config.example/stable-fallback.json");
     }
 
     #[test]
@@ -345,7 +533,7 @@ mod tests {
     #[test]
     fn nightly_same_base_different_hash_can_update() {
         assert!(should_offer_update(
-            &version("4.29.0-nightly.20260307.zzzzzzzz"),
+            &version("4.29.0-nightly.20260307.ffffffff"),
             UpdateChannel::Nightly,
             &version("4.29.0-nightly.20260307.11111111")
         ));

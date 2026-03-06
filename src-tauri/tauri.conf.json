@@ -63,6 +63,11 @@
       "endpoints": [
         "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest/download/latest-stable.json"
       ],
+      "channelEndpoints": {
+        "stable": "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest/download/latest-stable.json",
+        "nightly": "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/latest-nightly.json"
+      },
+      "nightlyVersionFormat": "<base>-nightly.<YYYYMMDD>.<sha8>",
       "windows": {
         "installMode": "passive"
       }

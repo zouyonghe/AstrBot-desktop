@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,9 +10,19 @@ SPEC = importlib.util.spec_from_file_location('generate_tauri_latest_json', SCRI
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
+FORMAT_SPEC = json.loads(
+    (SCRIPT_PATH.parents[1] / '..' / 'src-tauri' / 'nightly-version-format.json').resolve().read_text()
+)
 
 
 class GenerateTauriLatestJsonTests(unittest.TestCase):
+    def test_nightly_version_regex_matches_shared_examples(self):
+        for raw in FORMAT_SPEC['validExamples']:
+            self.assertIsNotNone(MODULE.NIGHTLY_VERSION_RE.fullmatch(raw), raw)
+
+        for raw in FORMAT_SPEC['invalidExamples']:
+            self.assertIsNone(MODULE.NIGHTLY_VERSION_RE.fullmatch(raw), raw)
+
     def test_derive_base_version_removes_nightly_suffix(self):
         self.assertEqual(
             MODULE.derive_base_version('4.29.0-nightly.20260307.abcd1234'),

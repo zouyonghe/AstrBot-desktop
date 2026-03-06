@@ -8,6 +8,7 @@ import re
 import sys
 from pathlib import Path
 
+# Canonical nightly version format lives in `src-tauri/nightly-version-format.json`.
 # Matches current and legacy Windows NSIS signature basenames, e.g.
 # AstrBot_4.19.2_windows_amd64_setup.exe
 # AstrBot_4.19.2_x64-setup.exe
@@ -25,7 +26,7 @@ MACOS_RE = re.compile(
     r"(?:_nightly_[0-9A-Fa-f]{7,40})?\.zip$"
 )
 NIGHTLY_VERSION_RE = re.compile(
-    r"^(?P<base>[0-9]+(?:\.[0-9]+){1,2})-nightly\.(?P<date>[0-9]{8})\.(?P<sha>[0-9A-Za-z-]+)$"
+    r"^(?P<base>[0-9]+(?:\.[0-9]+){1,2})-nightly\.(?P<date>[0-9]{8})\.(?P<sha>[0-9a-fA-F]{8})$"
 )
 
 ARCH_ALIAS = {
