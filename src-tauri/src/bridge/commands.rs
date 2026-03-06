@@ -1,11 +1,24 @@
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
 use crate::{
     append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
     BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
+use crate::bridge::updater_types::{
+    map_no_update_result, map_update_available_result, map_update_check_error,
+    map_update_install_error, map_update_install_ok, DesktopAppUpdateCheckResult,
+    DesktopAppUpdateResult,
+};
+
+const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
+    "Desktop app updater is not available on this platform yet.";
+
+fn desktop_updater_supported() -> bool {
+    cfg!(target_os = "windows") || cfg!(target_os = "macos")
+}
 
 fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
     let trimmed = raw_url.trim();
@@ -174,5 +187,63 @@ pub(crate) fn desktop_bridge_set_shell_locale(
                 reason: Some(error),
             }
         }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn desktop_bridge_check_app_update(
+    app_handle: AppHandle,
+) -> DesktopAppUpdateCheckResult {
+    let current_version = app_handle.package_info().version.to_string();
+    if !desktop_updater_supported() {
+        return map_update_check_error(Some(current_version), DESKTOP_UPDATER_UNSUPPORTED_REASON);
+    }
+
+    let updater = match app_handle.updater() {
+        Ok(updater) => updater,
+        Err(error) => {
+            return map_update_check_error(
+                Some(current_version),
+                format!("Failed to initialize updater: {error}"),
+            )
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            map_update_available_result(current_version, update.version.clone().to_string())
+        }
+        Ok(None) => map_no_update_result(current_version),
+        Err(error) => {
+            map_update_check_error(Some(current_version), format!("Failed to check updates: {error}"))
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn desktop_bridge_install_app_update(
+    app_handle: AppHandle,
+) -> DesktopAppUpdateResult {
+    if !desktop_updater_supported() {
+        return map_update_install_error(DESKTOP_UPDATER_UNSUPPORTED_REASON);
+    }
+
+    let updater = match app_handle.updater() {
+        Ok(updater) => updater,
+        Err(error) => return map_update_install_error(format!("Failed to initialize updater: {error}")),
+    };
+
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => return map_update_install_error("No update available."),
+        Err(error) => return map_update_install_error(format!("Failed to check updates: {error}")),
+    };
+
+    match update.download_and_install(|_, _| {}, || {}).await {
+        Ok(()) => {
+            app_handle.request_restart();
+            map_update_install_ok()
+        }
+        Err(error) => map_update_install_error(format!("Failed to install update: {error}")),
     }
 }

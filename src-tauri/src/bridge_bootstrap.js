@@ -22,6 +22,8 @@
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
     STOP_BACKEND: 'desktop_bridge_stop_backend',
     OPEN_EXTERNAL_URL: 'desktop_bridge_open_external_url',
+    CHECK_APP_UPDATE: 'desktop_bridge_check_app_update',
+    INSTALL_APP_UPDATE: 'desktop_bridge_install_app_update',
   });
   const TRAY_RESTART_BACKEND_EVENT = '{TRAY_RESTART_BACKEND_EVENT}';
 
@@ -721,6 +723,11 @@
       });
     },
     onTrayRestartBackend,
+  };
+
+  window.astrbotAppUpdater = {
+    checkForAppUpdate: () => invokeBridge(BRIDGE_COMMANDS.CHECK_APP_UPDATE),
+    installAppUpdate: () => invokeBridge(BRIDGE_COMMANDS.INSTALL_APP_UPDATE),
   };
 
   installNavigationBridges();

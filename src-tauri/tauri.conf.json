@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "windows": {
       "webviewInstallMode": {
@@ -54,6 +55,16 @@
       "../resources/backend": "backend",
       "../resources/webui": "webui",
       "windows/kill-backend-processes.ps1": "kill-backend-processes.ps1"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

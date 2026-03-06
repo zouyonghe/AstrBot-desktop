@@ -9,10 +9,24 @@ use crate::{
 };
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
-    builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        append_desktop_log("detected second instance launch, focusing existing main window");
-        window::actions::show_main_window(app, DEFAULT_SHELL_LOCALE, append_desktop_log);
-    }))
+    let updater_builder = {
+        let mut builder = tauri_plugin_updater::Builder::new();
+        if let Ok(pubkey) = std::env::var("ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY") {
+            let trimmed = pubkey.trim();
+            if !trimmed.is_empty() {
+                builder = builder.pubkey(trimmed);
+            }
+        }
+        builder
+    };
+
+    builder
+        .plugin(tauri_plugin_process::init())
+        .plugin(updater_builder.build())
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            append_desktop_log("detected second instance launch, focusing existing main window");
+            window::actions::show_main_window(app, DEFAULT_SHELL_LOCALE, append_desktop_log);
+        }))
 }
 
 fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
@@ -159,7 +173,9 @@ pub(crate) fn run() {
             crate::bridge::commands::desktop_bridge_set_shell_locale,
             crate::bridge::commands::desktop_bridge_restart_backend,
             crate::bridge::commands::desktop_bridge_stop_backend,
-            crate::bridge::commands::desktop_bridge_open_external_url
+            crate::bridge::commands::desktop_bridge_open_external_url,
+            crate::bridge::commands::desktop_bridge_check_app_update,
+            crate::bridge::commands::desktop_bridge_install_app_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -41,6 +41,7 @@ env:
   ASTRBOT_NIGHTLY_SOURCE_GIT_REF: ${{ vars.ASTRBOT_NIGHTLY_SOURCE_GIT_REF || 'master' }}
   ASTRBOT_NIGHTLY_SCHEDULE_CRON: ${{ vars.ASTRBOT_NIGHTLY_SCHEDULE_CRON || '7 3 * * *' }}
   ASTRBOT_NIGHTLY_UTC_HOUR: ${{ vars.ASTRBOT_NIGHTLY_UTC_HOUR || '3' }}
+  ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ vars.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY || '' }}
 
 jobs:
   resolve_build_context:
@@ -199,6 +200,7 @@ jobs:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
           ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
+          ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: cargo tauri build --bundles deb,rpm
@@ -276,6 +278,9 @@ jobs:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
           ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
+          ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS: ${{ vars.ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS || '3' }}
           ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS: ${{ vars.ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS || '8' }}
@@ -430,6 +435,9 @@ jobs:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
           ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
+          ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -510,6 +518,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/validate-release-artifacts.py release-artifacts
+
+      - name: Generate Tauri updater latest.json
+        env:
+          RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/generate-tauri-latest-json.py \
+            --artifacts-root release-artifacts \
+            --repo "${GITHUB_REPOSITORY}" \
+            --tag "${RELEASE_TAG}" \
+            --version "${RELEASE_VERSION}" \
+            --output release-artifacts/latest.json
 
       - name: Remove existing assets from target release
         env:
