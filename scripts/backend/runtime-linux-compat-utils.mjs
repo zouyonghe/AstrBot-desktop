@@ -68,11 +68,20 @@ const scanRuntimeTree = (runtimeLibDir) => {
   while (stack.length > 0) {
     const current = stack.pop();
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
+        if (isSharedObjectFileName(entry.name)) {
+          try {
+            if (fs.statSync(fullPath).isFile()) {
+              soFiles.push(fullPath);
+            }
+          } catch {
+            // Ignore broken symlinks or inaccessible targets.
+          }
+        }
         continue;
       }
 
-      const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
         if (
           entry.name === 'lib-dynload' &&
@@ -180,22 +189,20 @@ const parseRpathEntries = (rawRpath) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-const summarizeSpawnFailure = (spawnResult) => {
-  if (spawnResult.error) {
-    return spawnResult.error.message;
-  }
-
-  const stderr = (spawnResult.stderr || '').trim();
-  if (!stderr) {
-    return 'unknown error';
-  }
-  return stderr.length > 240 ? `${stderr.slice(0, 240)}...` : stderr;
-};
-
 const logPatchelfFailure = (operation, soFile, spawnResult) => {
+  let summary;
+  if (spawnResult.error) {
+    summary = spawnResult.error.message;
+  } else {
+    const stderr = (spawnResult.stderr || '').trim();
+    summary = stderr
+      ? (stderr.length > 240 ? `${stderr.slice(0, 240)}...` : stderr)
+      : 'unknown error';
+  }
+
   console.warn(
     `[build-backend] Warning: patchelf ${operation} failed for ${soFile} ` +
-      `(status=${spawnResult.status ?? 'null'}): ${summarizeSpawnFailure(spawnResult)}`,
+      `(status=${spawnResult.status ?? 'null'}): ${summary}`,
   );
 };
 
@@ -294,16 +301,20 @@ export const patchLinuxRuntimeRpaths = (runtimeDir) => {
     windowsHide: true,
   });
   if (patchelfProbe.error || patchelfProbe.status !== 0) {
-    const allowMissingPatchelf = isTruthyEnv(process.env.BUILD_BACKEND_ALLOW_MISSING_PATCHELF);
-    if (!allowMissingPatchelf) {
+    const requirePatchelf =
+      isTruthyEnv(process.env.BUILD_BACKEND_REQUIRE_PATCHELF) ||
+      isTruthyEnv(process.env.BUILD_BACKEND_STRICT) ||
+      isTruthyEnv(process.env.CI);
+    if (requirePatchelf) {
       throw new Error(
         '[build-backend] patchelf is required to normalize Linux runtime rpaths. ' +
-          'Install patchelf or set BUILD_BACKEND_ALLOW_MISSING_PATCHELF=1 to skip rpath normalization (not recommended for CI/AppImage releases).',
+          'Install patchelf, or disable strict mode by unsetting BUILD_BACKEND_REQUIRE_PATCHELF/BUILD_BACKEND_STRICT for local-only builds.',
       );
     }
 
     console.warn(
-      '[build-backend] patchelf is unavailable; skipping Linux runtime rpath normalization due to BUILD_BACKEND_ALLOW_MISSING_PATCHELF.',
+      '[build-backend] patchelf is unavailable; skipping Linux runtime rpath normalization. ' +
+        'Set BUILD_BACKEND_REQUIRE_PATCHELF=1 to enforce this check.',
     );
     return;
   }
