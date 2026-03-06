@@ -7,10 +7,13 @@ import json
 import re
 from pathlib import Path
 
-
+# Matches Windows NSIS installer assets normalized by the release workflow, e.g.
+# AstrBot_4.19.2_windows_amd64-setup.exe
 WINDOWS_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>[^_]+)_windows_(?P<arch>[^.]+)-setup\.exe$"
 )
+# Matches macOS updater archives normalized by the release workflow, e.g.
+# AstrBot_4.19.2_macos_arm64.zip
 MACOS_RE = re.compile(r"(?P<name>.+?)_(?P<version>[^_]+)_macos_(?P<arch>[^.]+)\.zip$")
 
 
@@ -47,7 +50,10 @@ def collect_platforms(root: Path, repo: str, tag: str) -> dict[str, dict[str, st
             exe_name = sig_name[:-4]
             match = WINDOWS_RE.match(exe_name)
             if not match:
-                raise ValueError(f"Unexpected Windows artifact name: {exe_name}")
+                raise ValueError(
+                    "Unexpected Windows artifact name: "
+                    f"{exe_name}. Expected format: <name>_<version>_windows_<arch>-setup.exe"
+                )
             arch = match.group("arch")
             platform_key = platform_key_for_windows(arch)
             platforms[platform_key] = {
@@ -59,12 +65,16 @@ def collect_platforms(root: Path, repo: str, tag: str) -> dict[str, dict[str, st
         if sig_name.endswith(".zip.sig"):
             zip_name = sig_name[:-4]
             match = MACOS_RE.match(zip_name)
-            if match:
-                platform_key = platform_key_for_macos(match.group("arch"))
-                platforms[platform_key] = {
-                    "signature": read_signature(sig_path),
-                    "url": asset_url(repo, tag, zip_name),
-                }
+            if not match:
+                raise ValueError(
+                    "Unexpected macOS artifact name: "
+                    f"{zip_name}. Expected format: <name>_<version>_macos_<arch>.zip"
+                )
+            platform_key = platform_key_for_macos(match.group("arch"))
+            platforms[platform_key] = {
+                "signature": read_signature(sig_path),
+                "url": asset_url(repo, tag, zip_name),
+            }
 
     return platforms
 
