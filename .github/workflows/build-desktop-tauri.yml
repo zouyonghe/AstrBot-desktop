@@ -519,19 +519,29 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/validate-release-artifacts.py release-artifacts
 
-      - name: Generate Tauri updater latest.json
+      - name: Generate Tauri updater manifest
         env:
           RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
           RELEASE_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
+          BUILD_MODE: ${{ needs.resolve_build_context.outputs.build_mode }}
         shell: bash
         run: |
           set -euo pipefail
+
+          manifest_channel="stable"
+          manifest_output="release-artifacts/latest-stable.json"
+          if [ "${BUILD_MODE}" = "nightly" ]; then
+            manifest_channel="nightly"
+            manifest_output="release-artifacts/latest-nightly.json"
+          fi
+
           python3 scripts/ci/generate-tauri-latest-json.py \
             --artifacts-root release-artifacts \
             --repo "${GITHUB_REPOSITORY}" \
             --tag "${RELEASE_TAG}" \
             --version "${RELEASE_VERSION}" \
-            --output release-artifacts/latest.json
+            --channel "${manifest_channel}" \
+            --output "${manifest_output}"
 
       - name: Remove existing assets from target release
         env:

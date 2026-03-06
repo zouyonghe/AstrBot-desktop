@@ -160,6 +160,8 @@ pub(crate) fn run() {
             crate::bridge::commands::desktop_bridge_get_backend_state,
             crate::bridge::commands::desktop_bridge_set_auth_token,
             crate::bridge::commands::desktop_bridge_set_shell_locale,
+            crate::bridge::commands::desktop_bridge_get_app_update_channel,
+            crate::bridge::commands::desktop_bridge_set_app_update_channel,
             crate::bridge::commands::desktop_bridge_restart_backend,
             crate::bridge::commands::desktop_bridge_stop_backend,
             crate::bridge::commands::desktop_bridge_open_external_url,

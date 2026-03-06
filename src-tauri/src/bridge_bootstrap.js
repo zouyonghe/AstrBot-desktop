@@ -19,6 +19,8 @@
     GET_BACKEND_STATE: 'desktop_bridge_get_backend_state',
     SET_AUTH_TOKEN: 'desktop_bridge_set_auth_token',
     SET_SHELL_LOCALE: 'desktop_bridge_set_shell_locale',
+    GET_APP_UPDATE_CHANNEL: 'desktop_bridge_get_app_update_channel',
+    SET_APP_UPDATE_CHANNEL: 'desktop_bridge_set_app_update_channel',
     RESTART_BACKEND: 'desktop_bridge_restart_backend',
     STOP_BACKEND: 'desktop_bridge_stop_backend',
     OPEN_EXTERNAL_URL: 'desktop_bridge_open_external_url',
@@ -726,6 +728,11 @@
   };
 
   window.astrbotAppUpdater = {
+    getUpdateChannel: () => invokeBridge(BRIDGE_COMMANDS.GET_APP_UPDATE_CHANNEL),
+    setUpdateChannel: (channel) =>
+      invokeBridge(BRIDGE_COMMANDS.SET_APP_UPDATE_CHANNEL, {
+        channel: typeof channel === 'string' ? channel : String(channel ?? ''),
+      }),
     checkForAppUpdate: () => invokeBridge(BRIDGE_COMMANDS.CHECK_APP_UPDATE),
     installAppUpdate: () => invokeBridge(BRIDGE_COMMANDS.INSTALL_APP_UPDATE),
   };

@@ -24,6 +24,7 @@ mod startup_task;
 
 mod tray;
 mod ui_dispatch;
+mod update_channel;
 mod webui_paths;
 mod window;
 

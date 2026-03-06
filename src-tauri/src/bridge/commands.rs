@@ -4,12 +4,12 @@ use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
 use crate::bridge::updater_types::{
-    map_no_update_result, map_update_available_result, map_update_check_error,
-    map_update_install_error, map_update_install_ok, DesktopAppUpdateCheckResult,
-    DesktopAppUpdateResult,
+    map_no_update_result, map_update_available_result, map_update_channel_error,
+    map_update_channel_ok, map_update_check_error, map_update_install_error, map_update_install_ok,
+    DesktopAppUpdateChannelResult, DesktopAppUpdateCheckResult, DesktopAppUpdateResult,
 };
 use crate::{
-    append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
+    append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray, update_channel,
     BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
 
@@ -18,6 +18,36 @@ const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
 
 fn desktop_updater_supported() -> bool {
     cfg!(target_os = "windows") || cfg!(target_os = "macos")
+}
+
+fn resolve_update_channel(app_handle: &AppHandle) -> update_channel::UpdateChannel {
+    let packaged_root_dir = runtime_paths::default_packaged_root_dir();
+    update_channel::resolve_preferred_channel(
+        &app_handle.package_info().version,
+        packaged_root_dir.as_deref(),
+    )
+}
+
+fn build_channel_aware_updater(
+    app_handle: &AppHandle,
+) -> Result<tauri_plugin_updater::Updater, String> {
+    let preferred_channel = resolve_update_channel(app_handle);
+    let endpoint = Url::parse(preferred_channel.manifest_url())
+        .map_err(|error| format!("Invalid updater endpoint: {error}"))?;
+
+    app_handle
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|error| format!("Failed to configure updater endpoint: {error}"))?
+        .version_comparator(move |current_version, remote_release| {
+            update_channel::should_offer_update(
+                &current_version,
+                preferred_channel,
+                &remote_release.version,
+            )
+        })
+        .build()
+        .map_err(|error| format!("Failed to initialize updater: {error}"))
 }
 
 fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
@@ -191,6 +221,36 @@ pub(crate) fn desktop_bridge_set_shell_locale(
 }
 
 #[tauri::command]
+pub(crate) fn desktop_bridge_get_app_update_channel(
+    app_handle: AppHandle,
+) -> DesktopAppUpdateChannelResult {
+    map_update_channel_ok(resolve_update_channel(&app_handle))
+}
+
+#[tauri::command]
+pub(crate) fn desktop_bridge_set_app_update_channel(
+    app_handle: AppHandle,
+    channel: String,
+) -> DesktopAppUpdateChannelResult {
+    let Some(channel) = update_channel::UpdateChannel::parse(&channel) else {
+        return map_update_channel_error("Invalid update channel. Expected 'stable' or 'nightly'.");
+    };
+
+    let packaged_root_dir = runtime_paths::default_packaged_root_dir();
+    match update_channel::write_cached_update_channel(Some(channel), packaged_root_dir.as_deref()) {
+        Ok(()) => {
+            append_desktop_log(&format!("update channel set to {:?}", channel));
+            let _ = app_handle;
+            map_update_channel_ok(channel)
+        }
+        Err(error) => {
+            append_desktop_log(&format!("failed to persist update channel: {error}"));
+            map_update_channel_error(error)
+        }
+    }
+}
+
+#[tauri::command]
 pub(crate) async fn desktop_bridge_check_app_update(
     app_handle: AppHandle,
 ) -> DesktopAppUpdateCheckResult {
@@ -199,14 +259,9 @@ pub(crate) async fn desktop_bridge_check_app_update(
         return map_update_check_error(Some(current_version), DESKTOP_UPDATER_UNSUPPORTED_REASON);
     }
 
-    let updater = match app_handle.updater() {
+    let updater = match build_channel_aware_updater(&app_handle) {
         Ok(updater) => updater,
-        Err(error) => {
-            return map_update_check_error(
-                Some(current_version),
-                format!("Failed to initialize updater: {error}"),
-            )
-        }
+        Err(error) => return map_update_check_error(Some(current_version), error),
     };
 
     match updater.check().await {
@@ -229,11 +284,9 @@ pub(crate) async fn desktop_bridge_install_app_update(
         return map_update_install_error(DESKTOP_UPDATER_UNSUPPORTED_REASON);
     }
 
-    let updater = match app_handle.updater() {
+    let updater = match build_channel_aware_updater(&app_handle) {
         Ok(updater) => updater,
-        Err(error) => {
-            return map_update_install_error(format!("Failed to initialize updater: {error}"))
-        }
+        Err(error) => return map_update_install_error(error),
     };
 
     let update = match updater.check().await {

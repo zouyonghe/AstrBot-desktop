@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::update_channel::UpdateChannel;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesktopAppUpdateCheckResult {
@@ -15,6 +17,14 @@ pub(crate) struct DesktopAppUpdateCheckResult {
 pub(crate) struct DesktopAppUpdateResult {
     pub ok: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DesktopAppUpdateChannelResult {
+    pub ok: bool,
+    pub reason: Option<String>,
+    pub channel: Option<UpdateChannel>,
 }
 
 pub(crate) fn map_no_update_result(current_version: String) -> DesktopAppUpdateCheckResult {
@@ -67,6 +77,22 @@ pub(crate) fn map_update_install_ok() -> DesktopAppUpdateResult {
     }
 }
 
+pub(crate) fn map_update_channel_ok(channel: UpdateChannel) -> DesktopAppUpdateChannelResult {
+    DesktopAppUpdateChannelResult {
+        ok: true,
+        reason: None,
+        channel: Some(channel),
+    }
+}
+
+pub(crate) fn map_update_channel_error(reason: impl Into<String>) -> DesktopAppUpdateChannelResult {
+    DesktopAppUpdateChannelResult {
+        ok: false,
+        reason: Some(reason.into()),
+        channel: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +130,12 @@ mod tests {
         let result = map_update_install_error("install failed");
         assert!(!result.ok);
         assert_eq!(result.reason.as_deref(), Some("install failed"));
+    }
+
+    #[test]
+    fn map_update_channel_ok_returns_channel() {
+        let result = map_update_channel_ok(UpdateChannel::Nightly);
+        assert!(result.ok);
+        assert_eq!(result.channel, Some(UpdateChannel::Nightly));
     }
 }
