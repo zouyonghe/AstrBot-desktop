@@ -15,7 +15,7 @@ use crate::{
 
 const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
     "Desktop app updater is not available on this platform yet.";
-const DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON: &str =
+pub(crate) const DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON: &str =
     "当前 Linux 安装方式不支持自动升级，请前往 GitHub Releases 下载最新安装包。";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,7 +222,7 @@ pub(crate) async fn desktop_bridge_check_app_update(
         DesktopUpdateMode::NativeUpdater => {}
         DesktopUpdateMode::ManualDownload => {
             return map_manual_download_result(
-                current_version,
+                &current_version,
                 DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON,
             )
         }

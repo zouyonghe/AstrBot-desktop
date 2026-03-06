@@ -205,7 +205,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: cargo tauri build --bundles deb,rpm,appimage
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" ]]; then
+            echo "TAURI signing secrets detected; building deb, rpm, and AppImage bundles."
+            cargo tauri build --bundles deb,rpm,appimage
+          else
+            echo "TAURI signing secrets missing; building deb and rpm bundles only."
+            cargo tauri build --bundles deb,rpm
+          fi
 
       - name: Smoke test backend startup (Linux)
         shell: bash

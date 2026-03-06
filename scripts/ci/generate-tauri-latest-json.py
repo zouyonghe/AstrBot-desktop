@@ -48,9 +48,10 @@ def platform_key_for_macos(arch: str) -> str:
 
 
 def platform_key_for_linux_appimage(arch: str) -> str:
-    if arch == "amd64":
+    normalized_arch = arch.lower()
+    if normalized_arch in {"amd64", "x86_64"}:
         return "linux-x86_64"
-    if arch == "arm64":
+    if normalized_arch in {"arm64", "aarch64"}:
         return "linux-aarch64"
     raise ValueError(f"Unsupported Linux AppImage arch: {arch}")
 
