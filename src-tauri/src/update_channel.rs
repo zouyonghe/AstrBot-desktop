@@ -23,6 +23,10 @@ struct NightlyVersionFormatSpec {
     canonical_format: String,
     date_digits: usize,
     sha_hex_digits: usize,
+    #[serde(default)]
+    valid_examples: Vec<String>,
+    #[serde(default)]
+    invalid_examples: Vec<String>,
 }
 
 fn nightly_version_format_spec() -> &'static NightlyVersionFormatSpec {
@@ -101,28 +105,21 @@ fn base_version(version: &Version) -> Version {
     base
 }
 
-fn non_empty_trimmed(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn non_empty_str(value: &Value) -> Option<String> {
-    value.as_str().and_then(non_empty_trimmed)
-}
-
 pub(crate) fn resolve_manifest_endpoint_from_sources(
     channel: UpdateChannel,
     updater_config: &Map<String, Value>,
 ) -> Result<String, String> {
+    let non_empty = |raw: &str| {
+        let trimmed = raw.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
     if let Some(endpoint) = updater_config
         .get(CHANNEL_ENDPOINTS_KEY)
         .and_then(Value::as_object)
         .and_then(|channels| channels.get(channel.config_key()))
-        .and_then(non_empty_str)
+        .and_then(Value::as_str)
+        .and_then(non_empty)
     {
         return Ok(endpoint);
     }
@@ -132,7 +129,8 @@ pub(crate) fn resolve_manifest_endpoint_from_sources(
             .get(ENDPOINTS_KEY)
             .and_then(Value::as_array)
             .and_then(|endpoints| endpoints.first())
-            .and_then(non_empty_str)
+            .and_then(Value::as_str)
+            .and_then(non_empty)
         {
             return Ok(endpoint);
         }
@@ -159,8 +157,9 @@ pub(crate) fn resolve_manifest_endpoint(
     channel: UpdateChannel,
 ) -> Result<String, String> {
     if let Ok(value) = env::var(channel.env_override_key()) {
-        if let Some(endpoint) = non_empty_trimmed(&value) {
-            return Ok(endpoint);
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
         }
     }
 
@@ -185,79 +184,77 @@ struct NightlyVersionInfo {
     hash: String,
 }
 
+fn log_nightly_parse_failure(version: &Version, reason: impl std::fmt::Display) {
+    crate::append_desktop_log(&format!(
+        "failed to parse nightly prerelease '{}' as '{}': {}",
+        version,
+        nightly_prerelease_format(),
+        reason,
+    ));
+}
+
 fn parse_nightly_version_info(version: &Version) -> Option<NightlyVersionInfo> {
-    #[derive(Debug)]
-    enum Error {
-        NotNightly,
-        MissingDate,
-        MissingHash,
-        TooManyIdentifiers,
-        BadDateFormat,
-        BadHashFormat,
-        DateParseFailed,
+    let spec = nightly_version_format_spec();
+    let mut identifiers = version.pre.as_str().split('.');
+
+    let first = identifiers.next()?;
+    if !first.eq_ignore_ascii_case(NIGHTLY_IDENTIFIER) {
+        return None;
     }
 
-    fn parse(
-        version: &Version,
-        spec: &NightlyVersionFormatSpec,
-    ) -> Result<NightlyVersionInfo, Error> {
-        let mut identifiers = version.pre.as_str().split('.');
-        let Some(first) = identifiers.next() else {
-            return Err(Error::NotNightly);
-        };
-        if !first.eq_ignore_ascii_case(NIGHTLY_IDENTIFIER) {
-            return Err(Error::NotNightly);
+    let date_raw = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            log_nightly_parse_failure(version, "missing date segment");
+            return None;
         }
+    };
 
-        let date_raw = identifiers.next().ok_or(Error::MissingDate)?;
-        let hash_raw = identifiers.next().ok_or(Error::MissingHash)?;
-        if identifiers.next().is_some() {
-            return Err(Error::TooManyIdentifiers);
+    let hash_raw = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            log_nightly_parse_failure(version, "missing hash segment");
+            return None;
         }
+    };
 
-        if date_raw.len() != spec.date_digits || !date_raw.chars().all(|ch| ch.is_ascii_digit()) {
-            return Err(Error::BadDateFormat);
-        }
-        if hash_raw.len() != spec.sha_hex_digits
-            || !hash_raw.chars().all(|ch| ch.is_ascii_hexdigit())
-        {
-            return Err(Error::BadHashFormat);
-        }
-
-        let date = date_raw
-            .parse::<u32>()
-            .map_err(|_| Error::DateParseFailed)?;
-        let hash = hash_raw.to_ascii_lowercase();
-
-        Ok(NightlyVersionInfo {
-            base: base_version(version),
-            date,
-            hash,
-        })
+    if identifiers.next().is_some() {
+        log_nightly_parse_failure(version, "too many prerelease identifiers");
+        return None;
     }
 
-    match parse(version, nightly_version_format_spec()) {
-        Ok(info) => Some(info),
-        Err(Error::NotNightly) => None,
-        Err(error) => {
-            let reason = match error {
-                Error::MissingDate => "missing date segment",
-                Error::MissingHash => "missing hash segment",
-                Error::TooManyIdentifiers => "too many prerelease identifiers",
-                Error::BadDateFormat => "date segment is not 8 ASCII digits",
-                Error::BadHashFormat => "hash segment is not 8 ASCII hex digits",
-                Error::DateParseFailed => "failed to parse date as u32",
-                Error::NotNightly => unreachable!("handled above"),
-            };
-            crate::append_desktop_log(&format!(
-                "failed to parse nightly prerelease '{}' as '{}': {}",
-                version,
-                nightly_prerelease_format(),
-                reason,
-            ));
-            None
-        }
+    if date_raw.len() != spec.date_digits || !date_raw.chars().all(|ch| ch.is_ascii_digit()) {
+        log_nightly_parse_failure(
+            version,
+            format!("date segment is not {} ASCII digits", spec.date_digits),
+        );
+        return None;
     }
+
+    if hash_raw.len() != spec.sha_hex_digits || !hash_raw.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        log_nightly_parse_failure(
+            version,
+            format!(
+                "hash segment is not {} ASCII hex digits",
+                spec.sha_hex_digits
+            ),
+        );
+        return None;
+    }
+
+    let date = match date_raw.parse::<u32>() {
+        Ok(value) => value,
+        Err(_) => {
+            log_nightly_parse_failure(version, "failed to parse date as u32");
+            return None;
+        }
+    };
+
+    Some(NightlyVersionInfo {
+        base: base_version(version),
+        date,
+        hash: hash_raw.to_ascii_lowercase(),
+    })
 }
 
 // Nightly-to-nightly comparisons only accept nightly remotes, then compare
@@ -438,25 +435,11 @@ mod tests {
     use std::fs;
 
     mod test_support {
-        use serde::Deserialize;
         use std::{
             fs,
             path::PathBuf,
             time::{SystemTime, UNIX_EPOCH},
         };
-
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        pub(super) struct NightlyVersionFormatSpec {
-            pub(super) canonical_format: String,
-            pub(super) valid_examples: Vec<String>,
-            pub(super) invalid_examples: Vec<String>,
-        }
-
-        pub(super) fn nightly_version_format_spec() -> NightlyVersionFormatSpec {
-            serde_json::from_str(include_str!("../nightly-version-format.json"))
-                .expect("nightly version format spec should parse")
-        }
 
         pub(super) fn create_temp_case_dir(name: &str) -> PathBuf {
             let ts = SystemTime::now()
@@ -496,7 +479,7 @@ mod tests {
         }
     }
 
-    use test_support::{create_temp_case_dir, nightly_version_format_spec, EnvVarGuard};
+    use test_support::{create_temp_case_dir, EnvVarGuard};
 
     fn version(raw: &str) -> Version {
         Version::parse(raw).expect("version should parse")
@@ -521,18 +504,14 @@ mod tests {
     #[test]
     fn parse_nightly_version_info_matches_shared_examples() {
         let spec = nightly_version_format_spec();
-        assert_eq!(
-            spec.canonical_format,
-            nightly_version_format_spec().canonical_format
-        );
 
-        for raw in spec.valid_examples {
-            let parsed = Version::parse(&raw).expect("valid nightly version should parse");
+        for raw in &spec.valid_examples {
+            let parsed = Version::parse(raw).expect("valid nightly version should parse");
             assert!(parse_nightly_version_info(&parsed).is_some(), "{raw}");
         }
 
-        for raw in spec.invalid_examples {
-            let parsed = Version::parse(&raw)
+        for raw in &spec.invalid_examples {
+            let parsed = Version::parse(raw)
                 .expect("invalid nightly example should still be semver-parseable");
             assert!(parse_nightly_version_info(&parsed).is_none(), "{raw}");
         }
@@ -623,16 +602,13 @@ mod tests {
 
     #[test]
     fn resolve_manifest_endpoint_allows_env_override_without_updater_config() {
-        let env_key = UpdateChannel::Nightly.env_override_key();
-        let previous = std::env::var(env_key).ok();
-        std::env::set_var(env_key, "https://env.example/nightly.json");
+        let _guard = EnvVarGuard::clear(UpdateChannel::Nightly.env_override_key());
+        std::env::set_var(
+            UpdateChannel::Nightly.env_override_key(),
+            "https://env.example/nightly.json",
+        );
 
         let result = resolve_manifest_endpoint(&HashMap::new(), UpdateChannel::Nightly);
-
-        match previous {
-            Some(value) => std::env::set_var(env_key, value),
-            None => std::env::remove_var(env_key),
-        }
 
         assert_eq!(
             result.expect("env override should resolve without updater config"),
