@@ -3,22 +3,20 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
+use crate::bridge::updater_messages::{
+    desktop_manual_download_reason, DESKTOP_UPDATER_UNSUPPORTED_REASON,
+};
+use crate::bridge::updater_mode::{resolve_desktop_update_mode, DesktopUpdateMode};
 use crate::bridge::updater_types::{
-    map_no_update_result, map_update_available_result, map_update_channel_error,
-    map_update_channel_ok, map_update_check_error, map_update_install_error, map_update_install_ok,
-    DesktopAppUpdateChannelResult, DesktopAppUpdateCheckResult, DesktopAppUpdateResult,
+    map_manual_download_result, map_no_update_result, map_update_available_result,
+    map_update_channel_error, map_update_channel_ok, map_update_check_error,
+    map_update_install_error, map_update_install_ok, DesktopAppUpdateChannelResult,
+    DesktopAppUpdateCheckResult, DesktopAppUpdateResult,
 };
 use crate::{
     append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray, update_channel,
     BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
-
-const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
-    "Desktop app updater is not available on this platform yet.";
-
-fn desktop_updater_supported() -> bool {
-    cfg!(target_os = "windows") || cfg!(target_os = "macos")
-}
 
 fn resolve_update_channel(app_handle: &AppHandle) -> update_channel::UpdateChannel {
     let packaged_root_dir = runtime_paths::default_packaged_root_dir();
@@ -268,8 +266,23 @@ pub(crate) async fn desktop_bridge_check_app_update(
     app_handle: AppHandle,
 ) -> DesktopAppUpdateCheckResult {
     let current_version = app_handle.package_info().version.to_string();
-    if !desktop_updater_supported() {
-        return map_update_check_error(Some(current_version), DESKTOP_UPDATER_UNSUPPORTED_REASON);
+    match resolve_desktop_update_mode() {
+        DesktopUpdateMode::NativeUpdater => {}
+        DesktopUpdateMode::ManualDownload => {
+            append_desktop_log(
+                "desktop updater check routed to manual-download mode for current Linux install",
+            );
+            return map_manual_download_result(&current_version, desktop_manual_download_reason());
+        }
+        DesktopUpdateMode::Unsupported => {
+            append_desktop_log(
+                "desktop updater check is unsupported on the current platform/runtime mode",
+            );
+            return map_update_check_error(
+                Some(current_version),
+                DESKTOP_UPDATER_UNSUPPORTED_REASON,
+            );
+        }
     }
 
     let updater = match build_channel_aware_updater(&app_handle) {
@@ -293,8 +306,20 @@ pub(crate) async fn desktop_bridge_check_app_update(
 pub(crate) async fn desktop_bridge_install_app_update(
     app_handle: AppHandle,
 ) -> DesktopAppUpdateResult {
-    if !desktop_updater_supported() {
-        return map_update_install_error(DESKTOP_UPDATER_UNSUPPORTED_REASON);
+    match resolve_desktop_update_mode() {
+        DesktopUpdateMode::NativeUpdater => {}
+        DesktopUpdateMode::ManualDownload => {
+            append_desktop_log(
+                "desktop updater install routed to manual-download mode for current Linux install",
+            );
+            return map_update_install_error(desktop_manual_download_reason());
+        }
+        DesktopUpdateMode::Unsupported => {
+            append_desktop_log(
+                "desktop updater install is unsupported on the current platform/runtime mode",
+            );
+            return map_update_install_error(DESKTOP_UPDATER_UNSUPPORTED_REASON);
+        }
     }
 
     let updater = match build_channel_aware_updater(&app_handle) {

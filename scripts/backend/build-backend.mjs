@@ -12,6 +12,10 @@ import {
   resolveExpectedRuntimeVersion,
   validateRuntimePython,
 } from './runtime-version-utils.mjs';
+import {
+  patchLinuxRuntimeRpaths,
+  pruneLinuxTkinterRuntime,
+} from './runtime-linux-compat-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..', '..');
@@ -590,6 +594,8 @@ const main = () => {
   copyAppSources(resolvedSourceDir);
   const runtimePython = prepareRuntimeExecutable(runtimeSourceReal);
   installRuntimeDependencies(runtimePython);
+  pruneLinuxTkinterRuntime(runtimeDir);
+  patchLinuxRuntimeRpaths(runtimeDir);
   writeLauncherScript();
   writeRuntimeManifest(runtimePython);
 
