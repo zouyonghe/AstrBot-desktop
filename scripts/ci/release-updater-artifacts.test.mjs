@@ -18,8 +18,8 @@ const runPythonRaw = (moduleName, args, cwd = projectRoot) =>
     encoding: 'utf8',
   });
 
-const runPython = (scriptPath, args, cwd = projectRoot) => {
-  const result = runPythonRaw(scriptPath, args, cwd);
+const runPython = (moduleName, args, cwd = projectRoot) => {
+  const result = runPythonRaw(moduleName, args, cwd);
 
   if (result.status !== 0) {
     throw new Error(
