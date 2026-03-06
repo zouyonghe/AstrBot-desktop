@@ -232,6 +232,14 @@ jobs:
           path: |
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.rpm
+
+      - name: Upload AppImage artifacts (Linux)
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: astrbot-desktop-tauri-${{ needs.resolve_build_context.outputs.astrbot_version }}-linux-${{ matrix.arch }}-appimage
+          if-no-files-found: ignore
+          path: |
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.AppImage.sig
 
