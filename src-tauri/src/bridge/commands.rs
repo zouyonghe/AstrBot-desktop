@@ -3,6 +3,9 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
+use crate::bridge::updater_messages::{
+    desktop_manual_download_reason, DESKTOP_UPDATER_UNSUPPORTED_REASON,
+};
 use crate::bridge::updater_types::{
     map_manual_download_result, map_no_update_result, map_update_available_result,
     map_update_check_error, map_update_install_error, map_update_install_ok,
@@ -12,28 +15,6 @@ use crate::{
     append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
     BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
-
-const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
-    "Desktop app updater is not available on this platform yet.";
-pub(crate) const DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON: &str =
-    "This Linux installation method does not support automatic updates. Please download the latest package from your installation source.";
-const DEFAULT_DESKTOP_UPDATER_MANUAL_DOWNLOAD_URL: &str =
-    "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest";
-
-fn resolve_desktop_manual_download_url() -> String {
-    std::env::var("ASTRBOT_DESKTOP_MANUAL_DOWNLOAD_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_DESKTOP_UPDATER_MANUAL_DOWNLOAD_URL.to_string())
-}
-
-fn desktop_manual_download_reason() -> String {
-    format!(
-        "{DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON} {}",
-        resolve_desktop_manual_download_url()
-    )
-}
 
 fn is_linux_appimage_runtime() -> bool {
     const LINUX_APPIMAGE_RUNTIME_MARKERS: [&str; 2] = ["APPIMAGE", "APPDIR"];

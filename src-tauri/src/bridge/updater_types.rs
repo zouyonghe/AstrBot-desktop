@@ -123,7 +123,7 @@ mod tests {
     fn map_manual_download_result_keeps_current_version_and_reason() {
         let result = map_manual_download_result(
             "4.19.2",
-            crate::bridge::commands::DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON,
+            crate::bridge::updater_messages::DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON,
         );
         assert!(result.ok);
         assert_eq!(result.current_version.as_deref(), Some("4.19.2"));
@@ -131,7 +131,7 @@ mod tests {
         assert!(!result.has_update);
         assert_eq!(
             result.reason.as_deref(),
-            Some(crate::bridge::commands::DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON)
+            Some(crate::bridge::updater_messages::DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON)
         );
     }
 }
