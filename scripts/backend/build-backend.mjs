@@ -435,6 +435,7 @@ const SO_LIBRARY_NAME_PATTERN = /\.so(\.[0-9]+)*$/;
 const ELF_MAGIC_BYTES = Buffer.from([0x7f, 0x45, 0x4c, 0x46]);
 
 const isSharedObjectFileName = (fileName) => SO_LIBRARY_NAME_PATTERN.test(fileName);
+const startsWithAnyPrefix = (value, prefixes) => prefixes.some((prefix) => value.startsWith(prefix));
 
 const removeFilesByPrefix = (directory, prefixes) => {
   if (!fs.existsSync(directory)) {
@@ -445,7 +446,7 @@ const removeFilesByPrefix = (directory, prefixes) => {
     if (!entry.isFile()) {
       continue;
     }
-    if (!prefixes.some((prefix) => entry.name.startsWith(prefix))) {
+    if (!startsWithAnyPrefix(entry.name, prefixes)) {
       continue;
     }
     fs.rmSync(path.join(directory, entry.name), { force: true });
@@ -453,6 +454,12 @@ const removeFilesByPrefix = (directory, prefixes) => {
   }
   return removedCount;
 };
+
+const listImmediateDirectoriesByPrefix = (rootDir, prefixes) =>
+  fs
+    .readdirSync(rootDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && startsWithAnyPrefix(entry.name, prefixes))
+    .map((entry) => path.join(rootDir, entry.name));
 
 const removeDirectoriesByPrefix = (rootDir, prefixes, { recursive = false } = {}) => {
   if (!fs.existsSync(rootDir)) {
@@ -462,12 +469,9 @@ const removeDirectoriesByPrefix = (rootDir, prefixes, { recursive = false } = {}
   const candidates = recursive
     ? walkDirectoriesRecursively(
         rootDir,
-        (_fullPath, dirName) => prefixes.some((prefix) => dirName.startsWith(prefix)),
+        (_fullPath, dirName) => startsWithAnyPrefix(dirName, prefixes),
       )
-    : fs
-        .readdirSync(rootDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && prefixes.some((prefix) => entry.name.startsWith(prefix)))
-        .map((entry) => path.join(rootDir, entry.name));
+    : listImmediateDirectoriesByPrefix(rootDir, prefixes);
 
   let removedCount = 0;
   for (const candidatePath of candidates.sort((a, b) => b.length - a.length)) {
@@ -480,12 +484,11 @@ const removeDirectoriesByPrefix = (rootDir, prefixes, { recursive = false } = {}
   return removedCount;
 };
 
-const walkFilesRecursively = (rootDir, predicate) => {
+const walkRecursively = (rootDir, { onFile, onDirectory } = {}) => {
   if (!fs.existsSync(rootDir)) {
-    return [];
+    return;
   }
   const stack = [rootDir];
-  const collected = [];
   while (stack.length > 0) {
     const current = stack.pop();
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
@@ -494,39 +497,40 @@ const walkFilesRecursively = (rootDir, predicate) => {
       }
       const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (onDirectory) {
+          onDirectory(fullPath, entry.name);
+        }
         stack.push(fullPath);
         continue;
       }
-      if (entry.isFile() && predicate(fullPath, entry.name)) {
-        collected.push(fullPath);
+      if (entry.isFile() && onFile) {
+        onFile(fullPath, entry.name);
       }
     }
   }
+};
+
+const walkFilesRecursively = (rootDir, predicate) => {
+  const collected = [];
+  walkRecursively(rootDir, {
+    onFile: (fullPath, fileName) => {
+      if (predicate(fullPath, fileName)) {
+        collected.push(fullPath);
+      }
+    },
+  });
   return collected;
 };
 
 const walkDirectoriesRecursively = (rootDir, predicate) => {
-  if (!fs.existsSync(rootDir)) {
-    return [];
-  }
-  const stack = [rootDir];
   const collected = [];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.isSymbolicLink()) {
-        continue;
-      }
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const fullPath = path.join(current, entry.name);
-      if (predicate(fullPath, entry.name)) {
+  walkRecursively(rootDir, {
+    onDirectory: (fullPath, dirName) => {
+      if (predicate(fullPath, dirName)) {
         collected.push(fullPath);
       }
-      stack.push(fullPath);
-    }
-  }
+    },
+  });
   return collected;
 };
 
@@ -550,6 +554,12 @@ const hasElfMagic = (filePath) => {
   }
 };
 
+const isPathInsideRoot = (candidatePath, rootPath) =>
+  candidatePath === rootPath || candidatePath.startsWith(`${rootPath}${path.sep}`);
+
+const isPathInsideAnyRoot = (candidatePath, roots) =>
+  roots.some((rootPath) => isPathInsideRoot(candidatePath, rootPath));
+
 const findPythonLibDynloadDirs = (runtimeLibDir) =>
   walkDirectoriesRecursively(
     runtimeLibDir,
@@ -557,7 +567,48 @@ const findPythonLibDynloadDirs = (runtimeLibDir) =>
       dirName === 'lib-dynload' && path.basename(path.dirname(dirPath)).startsWith('python'),
   );
 
-const computeRpathSearchEntries = (soFile, sitePackagesRoots, libsDirsBySitePackages) => {
+const getPythonLibDirs = (runtimeLibDir) =>
+  fs.existsSync(runtimeLibDir)
+    ? fs
+        .readdirSync(runtimeLibDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith('python'))
+        .map((entry) => path.join(runtimeLibDir, entry.name))
+    : [];
+
+const getSitePackagesRoots = (pythonLibDirs) =>
+  pythonLibDirs
+    .map((pythonDir) => path.join(pythonDir, 'site-packages'))
+    .filter((sitePackagesDir) => fs.existsSync(sitePackagesDir));
+
+const buildLibsDirsBySitePackages = (sitePackagesRoots) => {
+  const libsDirsBySitePackages = new Map();
+  for (const sitePackagesRoot of sitePackagesRoots) {
+    const libsDirs = walkDirectoriesRecursively(
+      sitePackagesRoot,
+      (_fullPath, dirName) => dirName.endsWith('.libs'),
+    );
+    libsDirsBySitePackages.set(sitePackagesRoot, libsDirs);
+  }
+  return libsDirsBySitePackages;
+};
+
+const getSitePackagesContextFor = (soFile, sitePackagesRoots, libsDirsBySitePackages) => {
+  for (const root of sitePackagesRoots) {
+    if (!isPathInsideRoot(soFile, root)) {
+      continue;
+    }
+    return {
+      root,
+      libsDirs: libsDirsBySitePackages.get(root) || [],
+    };
+  }
+  return { root: null, libsDirs: [] };
+};
+
+const shouldPatchRuntimeSoFile = (soFile, runtimeLibDir, pythonLibDirs) =>
+  path.dirname(soFile) === runtimeLibDir || isPathInsideAnyRoot(soFile, pythonLibDirs);
+
+const computeRpathSearchEntries = (soFile, { libsDirs }) => {
   const searchEntries = [
     '$ORIGIN',
     '$ORIGIN/..',
@@ -567,25 +618,92 @@ const computeRpathSearchEntries = (soFile, sitePackagesRoots, libsDirsBySitePack
     '$ORIGIN/../.libs',
   ];
 
-  for (const sitePackagesRoot of sitePackagesRoots) {
-    if (!soFile.startsWith(`${sitePackagesRoot}${path.sep}`)) {
+  for (const libsDir of libsDirs) {
+    const relativePath = path.relative(path.dirname(soFile), libsDir);
+    if (!relativePath || relativePath === '.') {
+      searchEntries.push('$ORIGIN');
       continue;
     }
-    const libsDirs = libsDirsBySitePackages.get(sitePackagesRoot) || [];
-    for (const libsDir of libsDirs) {
-      const relativePath = path.relative(path.dirname(soFile), libsDir);
-      if (!relativePath || relativePath === '.') {
-        searchEntries.push('$ORIGIN');
-        continue;
-      }
-      if (relativePath.startsWith('..')) {
-        searchEntries.push(`$ORIGIN/${relativePath.split(path.sep).join('/')}`);
-      }
+    if (relativePath.startsWith('..')) {
+      searchEntries.push(`$ORIGIN/${relativePath.split(path.sep).join('/')}`);
     }
-    break;
   }
 
   return searchEntries;
+};
+
+const parseRpathEntries = (rawRpath) =>
+  (rawRpath || '')
+    .trim()
+    .split(':')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const summarizeSpawnFailure = (spawnResult) => {
+  if (spawnResult.error) {
+    return spawnResult.error.message;
+  }
+  const stderr = (spawnResult.stderr || '').trim();
+  if (!stderr) {
+    return 'unknown error';
+  }
+  return stderr.length > 240 ? `${stderr.slice(0, 240)}...` : stderr;
+};
+
+const warnPatchelfFailure = (operation, soFile, spawnResult) => {
+  console.warn(
+    `[build-backend] Warning: patchelf ${operation} failed for ${soFile} ` +
+      `(status=${spawnResult.status ?? 'null'}): ${summarizeSpawnFailure(spawnResult)}`,
+  );
+};
+
+const patchRuntimeSoFile = (
+  soFile,
+  { runtimeLibDir, pythonLibDirs, sitePackagesRoots, libsDirsBySitePackages },
+) => {
+  if (!shouldPatchRuntimeSoFile(soFile, runtimeLibDir, pythonLibDirs)) {
+    return false;
+  }
+  if (!hasElfMagic(soFile)) {
+    return false;
+  }
+
+  const printRpathResult = spawnSync('patchelf', ['--print-rpath', soFile], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (printRpathResult.error || printRpathResult.status !== 0) {
+    warnPatchelfFailure('--print-rpath', soFile, printRpathResult);
+    return false;
+  }
+
+  const sitePackagesContext = getSitePackagesContextFor(
+    soFile,
+    sitePackagesRoots,
+    libsDirsBySitePackages,
+  );
+  const searchEntries = computeRpathSearchEntries(soFile, sitePackagesContext);
+
+  const existingRpathEntries = parseRpathEntries(printRpathResult.stdout);
+  const finalEntries = Array.from(new Set([...existingRpathEntries, ...searchEntries]));
+
+  const rpathUnchanged =
+    finalEntries.length === existingRpathEntries.length &&
+    finalEntries.every((entry, index) => entry === existingRpathEntries[index]);
+  if (rpathUnchanged) {
+    return false;
+  }
+
+  const setRpathResult = spawnSync('patchelf', ['--set-rpath', finalEntries.join(':'), soFile], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (setRpathResult.error || setRpathResult.status !== 0) {
+    warnPatchelfFailure('--set-rpath', soFile, setRpathResult);
+    return false;
+  }
+
+  return true;
 };
 
 const pruneLinuxTkinterRuntime = () => {
@@ -630,69 +748,22 @@ const patchLinuxRuntimeRpaths = () => {
   }
 
   const runtimeLibDir = path.join(runtimeDir, 'lib');
-  const pythonLibDirs = fs.existsSync(runtimeLibDir)
-    ? fs
-        .readdirSync(runtimeLibDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name.startsWith('python'))
-        .map((entry) => path.join(runtimeLibDir, entry.name))
-    : [];
-
-  const sitePackagesRoots = pythonLibDirs
-    .map((pythonDir) => path.join(pythonDir, 'site-packages'))
-    .filter((sitePackagesDir) => fs.existsSync(sitePackagesDir));
-  const libsDirsBySitePackages = new Map();
-  for (const sitePackagesRoot of sitePackagesRoots) {
-    const libsDirs = walkDirectoriesRecursively(
-      sitePackagesRoot,
-      (_fullPath, dirName) => dirName.endsWith('.libs'),
-    );
-    libsDirsBySitePackages.set(sitePackagesRoot, libsDirs);
-  }
-
-  const soFiles = walkFilesRecursively(
-    runtimeDir,
-    (_fullPath, fileName) => isSharedObjectFileName(fileName),
+  const pythonLibDirs = getPythonLibDirs(runtimeLibDir);
+  const sitePackagesRoots = getSitePackagesRoots(pythonLibDirs);
+  const libsDirsBySitePackages = buildLibsDirsBySitePackages(sitePackagesRoots);
+  const soFiles = walkFilesRecursively(runtimeLibDir, (_fullPath, fileName) =>
+    isSharedObjectFileName(fileName),
   );
+  const patchContext = {
+    runtimeLibDir,
+    pythonLibDirs,
+    sitePackagesRoots,
+    libsDirsBySitePackages,
+  };
 
   let patchedCount = 0;
   for (const soFile of soFiles) {
-    if (!hasElfMagic(soFile)) {
-      continue;
-    }
-
-    const printRpathResult = spawnSync('patchelf', ['--print-rpath', soFile], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (printRpathResult.error || printRpathResult.status !== 0) {
-      continue;
-    }
-
-    const searchEntries = computeRpathSearchEntries(soFile, sitePackagesRoots, libsDirsBySitePackages);
-
-    const existingRpathEntries = (printRpathResult.stdout || '')
-      .trim()
-      .split(':')
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    const finalEntries = Array.from(new Set([...existingRpathEntries, ...searchEntries]));
-
-    const rpathUnchanged =
-      finalEntries.length === existingRpathEntries.length &&
-      finalEntries.every((entry, index) => entry === existingRpathEntries[index]);
-    if (rpathUnchanged) {
-      continue;
-    }
-
-    const setRpathResult = spawnSync(
-      'patchelf',
-      ['--set-rpath', finalEntries.join(':'), soFile],
-      {
-        encoding: 'utf8',
-        windowsHide: true,
-      },
-    );
-    if (!setRpathResult.error && setRpathResult.status === 0) {
+    if (patchRuntimeSoFile(soFile, patchContext)) {
       patchedCount += 1;
     }
   }

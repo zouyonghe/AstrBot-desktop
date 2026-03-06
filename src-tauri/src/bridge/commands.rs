@@ -35,6 +35,13 @@ fn desktop_manual_download_reason() -> String {
     )
 }
 
+fn is_linux_appimage_runtime() -> bool {
+    const LINUX_APPIMAGE_RUNTIME_MARKERS: [&str; 2] = ["APPIMAGE", "APPDIR"];
+    LINUX_APPIMAGE_RUNTIME_MARKERS
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopUpdateMode {
     NativeUpdater,
@@ -48,9 +55,7 @@ fn resolve_desktop_update_mode() -> DesktopUpdateMode {
     }
 
     if cfg!(target_os = "linux") {
-        let has_appimage =
-            std::env::var_os("APPIMAGE").is_some() || std::env::var_os("APPDIR").is_some();
-        return if has_appimage {
+        return if is_linux_appimage_runtime() {
             DesktopUpdateMode::NativeUpdater
         } else {
             DesktopUpdateMode::ManualDownload
@@ -241,10 +246,7 @@ pub(crate) async fn desktop_bridge_check_app_update(
             append_desktop_log(
                 "desktop updater check routed to manual-download mode for current Linux install",
             );
-            return map_manual_download_result(
-                &current_version,
-                desktop_manual_download_reason(),
-            );
+            return map_manual_download_result(&current_version, desktop_manual_download_reason());
         }
         DesktopUpdateMode::Unsupported => {
             append_desktop_log(
