@@ -3,14 +3,14 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
-use crate::{
-    append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
-    BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
-};
 use crate::bridge::updater_types::{
     map_no_update_result, map_update_available_result, map_update_check_error,
     map_update_install_error, map_update_install_ok, DesktopAppUpdateCheckResult,
     DesktopAppUpdateResult,
+};
+use crate::{
+    append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
+    BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
 
 const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
@@ -214,9 +214,10 @@ pub(crate) async fn desktop_bridge_check_app_update(
             map_update_available_result(current_version, update.version.clone().to_string())
         }
         Ok(None) => map_no_update_result(current_version),
-        Err(error) => {
-            map_update_check_error(Some(current_version), format!("Failed to check updates: {error}"))
-        }
+        Err(error) => map_update_check_error(
+            Some(current_version),
+            format!("Failed to check updates: {error}"),
+        ),
     }
 }
 
@@ -230,7 +231,9 @@ pub(crate) async fn desktop_bridge_install_app_update(
 
     let updater = match app_handle.updater() {
         Ok(updater) => updater,
-        Err(error) => return map_update_install_error(format!("Failed to initialize updater: {error}")),
+        Err(error) => {
+            return map_update_install_error(format!("Failed to initialize updater: {error}"))
+        }
     };
 
     let update = match updater.check().await {
