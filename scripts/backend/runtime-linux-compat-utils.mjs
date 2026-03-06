@@ -197,9 +197,14 @@ const logPatchelfFailure = (operation, soFile, spawnResult) => {
   );
 };
 
+const resolvePatchelfCommand = () => {
+  const configuredPath = (process.env.BUILD_BACKEND_PATCHELF_PATH || '').trim();
+  return configuredPath || 'patchelf';
+};
+
 const patchRuntimeSoFile = (
   soFile,
-  { runtimeLibDir, pythonLibDirs, libsDirsBySitePackages },
+  { runtimeLibDir, pythonLibDirs, libsDirsBySitePackages, patchelfCommand },
 ) => {
   if (!shouldPatchRuntimeSoFile(soFile, runtimeLibDir, pythonLibDirs)) {
     return false;
@@ -208,7 +213,7 @@ const patchRuntimeSoFile = (
     return false;
   }
 
-  const printRpathResult = spawnSync('patchelf', ['--print-rpath', soFile], {
+  const printRpathResult = spawnSync(patchelfCommand, ['--print-rpath', soFile], {
     encoding: 'utf8',
     windowsHide: true,
   });
@@ -234,10 +239,14 @@ const patchRuntimeSoFile = (
     return false;
   }
 
-  const setRpathResult = spawnSync('patchelf', ['--set-rpath', finalEntries.join(':'), soFile], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
+  const setRpathResult = spawnSync(
+    patchelfCommand,
+    ['--set-rpath', finalEntries.join(':'), soFile],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+    },
+  );
   if (setRpathResult.error || setRpathResult.status !== 0) {
     logPatchelfFailure('--set-rpath', soFile, setRpathResult);
     return false;
@@ -294,20 +303,21 @@ export const patchLinuxRuntimeRpaths = (runtimeDir) => {
     return;
   }
 
-  const patchelfProbe = spawnSync('patchelf', ['--version'], {
+  const patchelfCommand = resolvePatchelfCommand();
+  const patchelfProbe = spawnSync(patchelfCommand, ['--version'], {
     encoding: 'utf8',
     windowsHide: true,
   });
   if (patchelfProbe.error || patchelfProbe.status !== 0) {
     if (requirePatchelf()) {
       throw new Error(
-        '[build-backend] patchelf is required to normalize Linux runtime rpaths. ' +
+        `[build-backend] ${patchelfCommand} is required to normalize Linux runtime rpaths. ` +
           'Install patchelf, or unset BUILD_BACKEND_REQUIRE_PATCHELF / CI for local-only builds.',
       );
     }
 
     console.warn(
-      '[build-backend] patchelf is unavailable; skipping Linux runtime rpath normalization. ' +
+      `[build-backend] ${patchelfCommand} is unavailable; skipping Linux runtime rpath normalization. ` +
         'Set BUILD_BACKEND_REQUIRE_PATCHELF=1 or CI=1 to enforce this check.',
     );
     return;
@@ -319,6 +329,7 @@ export const patchLinuxRuntimeRpaths = (runtimeDir) => {
     runtimeLibDir,
     pythonLibDirs,
     libsDirsBySitePackages,
+    patchelfCommand,
   };
 
   let patchedCount = 0;

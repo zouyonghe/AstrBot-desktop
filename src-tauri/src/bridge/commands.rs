@@ -6,6 +6,7 @@ use url::Url;
 use crate::bridge::updater_messages::{
     desktop_manual_download_reason, DESKTOP_UPDATER_UNSUPPORTED_REASON,
 };
+use crate::bridge::updater_mode::{resolve_desktop_update_mode, DesktopUpdateMode};
 use crate::bridge::updater_types::{
     map_manual_download_result, map_no_update_result, map_update_available_result,
     map_update_check_error, map_update_install_error, map_update_install_ok,
@@ -15,36 +16,6 @@ use crate::{
     append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray,
     BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
-
-fn is_linux_appimage_runtime() -> bool {
-    const LINUX_APPIMAGE_RUNTIME_MARKERS: [&str; 2] = ["APPIMAGE", "APPDIR"];
-    LINUX_APPIMAGE_RUNTIME_MARKERS
-        .iter()
-        .any(|name| std::env::var_os(name).is_some())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DesktopUpdateMode {
-    NativeUpdater,
-    ManualDownload,
-    Unsupported,
-}
-
-fn resolve_desktop_update_mode() -> DesktopUpdateMode {
-    if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
-        return DesktopUpdateMode::NativeUpdater;
-    }
-
-    if cfg!(target_os = "linux") {
-        return if is_linux_appimage_runtime() {
-            DesktopUpdateMode::NativeUpdater
-        } else {
-            DesktopUpdateMode::ManualDownload
-        };
-    }
-
-    DesktopUpdateMode::Unsupported
-}
 
 fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
     let trimmed = raw_url.trim();
