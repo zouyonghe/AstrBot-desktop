@@ -489,7 +489,6 @@ mod tests {
         assert_eq!(stable, "https://config.example/stable-fallback.json");
     }
 
-
     #[test]
     fn resolve_manifest_endpoint_reports_stable_fallback_in_error() {
         let updater_config = json!({});
