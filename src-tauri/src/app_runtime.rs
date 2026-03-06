@@ -9,20 +9,9 @@ use crate::{
 };
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
-    let updater_builder = {
-        let mut builder = tauri_plugin_updater::Builder::new();
-        if let Ok(pubkey) = std::env::var("ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY") {
-            let trimmed = pubkey.trim();
-            if !trimmed.is_empty() {
-                builder = builder.pubkey(trimmed);
-            }
-        }
-        builder
-    };
-
     builder
         .plugin(tauri_plugin_process::init())
-        .plugin(updater_builder.build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             append_desktop_log("detected second instance launch, focusing existing main window");
             window::actions::show_main_window(app, DEFAULT_SHELL_LOCALE, append_desktop_log);
