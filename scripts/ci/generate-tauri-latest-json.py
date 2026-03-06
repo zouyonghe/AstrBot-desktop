@@ -67,12 +67,10 @@ def collect_platforms(root: Path, repo: str, tag: str) -> dict[str, dict[str, st
             zip_name = sig_name[:-4]
             match = MACOS_RE.match(zip_name)
             if not match:
-                print(
-                    "[generate-tauri-latest-json] Ignoring unrecognized macOS signature file: "
-                    f"{zip_name}. Expected format: <name>_<version>_macos_<arch>.zip",
-                    file=sys.stderr,
+                raise ValueError(
+                    "Unexpected macOS artifact name: "
+                    f"{zip_name}. Expected format: <name>_<version>_macos_<arch>.zip"
                 )
-                continue
             platform_key = platform_key_for_macos(match.group("arch"))
             platforms[platform_key] = {
                 "signature": read_signature(sig_path),
