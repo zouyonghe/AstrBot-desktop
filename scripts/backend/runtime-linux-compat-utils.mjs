@@ -55,7 +55,15 @@ const resolveSitePackagesRootForPath = (candidatePath) => {
   return candidatePath.slice(0, markerIndex + `${path.sep}site-packages`.length);
 };
 
-const scanRuntimeTree = (runtimeDir) => {
+const scanRuntimeTree = (
+  runtimeDir,
+  {
+    wantSoFiles = false,
+    wantPythonDynloadDirs = false,
+    wantLibsDirsBySitePackages = false,
+    wantPythonLibDirs = false,
+  } = {},
+) => {
   const runtimeLibDir = path.join(runtimeDir, 'lib');
   const soFiles = [];
   const pythonDynloadDirs = [];
@@ -72,10 +80,24 @@ const scanRuntimeTree = (runtimeDir) => {
     };
   }
 
-  for (const entry of fs.readdirSync(runtimeLibDir, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name.startsWith('python')) {
-      pythonLibDirs.push(path.join(runtimeLibDir, entry.name));
+  if (wantPythonLibDirs) {
+    for (const entry of fs.readdirSync(runtimeLibDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith('python')) {
+        pythonLibDirs.push(path.join(runtimeLibDir, entry.name));
+      }
     }
+  }
+
+  const shouldTraverseRecursively =
+    wantSoFiles || wantPythonDynloadDirs || wantLibsDirsBySitePackages;
+  if (!shouldTraverseRecursively) {
+    return {
+      runtimeLibDir,
+      soFiles,
+      pythonDynloadDirs,
+      libsDirsBySitePackages,
+      pythonLibDirs,
+    };
   }
 
   const stack = [runtimeLibDir];
@@ -84,7 +106,7 @@ const scanRuntimeTree = (runtimeDir) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const fullPath = path.join(current, entry.name);
       if (entry.isSymbolicLink()) {
-        if (isSharedObjectFileName(entry.name)) {
+        if (wantSoFiles && isSharedObjectFileName(entry.name)) {
           try {
             if (fs.statSync(fullPath).isFile()) {
               soFiles.push(fullPath);
@@ -98,13 +120,14 @@ const scanRuntimeTree = (runtimeDir) => {
 
       if (entry.isDirectory()) {
         if (
+          wantPythonDynloadDirs &&
           entry.name === 'lib-dynload' &&
           path.basename(path.dirname(fullPath)).startsWith('python')
         ) {
           pythonDynloadDirs.push(fullPath);
         }
 
-        if (entry.name.endsWith('.libs')) {
+        if (wantLibsDirsBySitePackages && entry.name.endsWith('.libs')) {
           const sitePackagesRoot = resolveSitePackagesRootForPath(fullPath);
           if (sitePackagesRoot) {
             const existing = libsDirsBySitePackages.get(sitePackagesRoot) || [];
@@ -117,7 +140,7 @@ const scanRuntimeTree = (runtimeDir) => {
         continue;
       }
 
-      if (entry.isFile() && isSharedObjectFileName(entry.name)) {
+      if (wantSoFiles && entry.isFile() && isSharedObjectFileName(entry.name)) {
         soFiles.push(fullPath);
       }
     }
@@ -130,16 +153,6 @@ const scanRuntimeTree = (runtimeDir) => {
     libsDirsBySitePackages,
     pythonLibDirs,
   };
-};
-
-const shouldPatchRuntimeSoFile = (soFile, runtimeLibDir, pythonLibDirs) => {
-  if (path.dirname(soFile) === runtimeLibDir) {
-    return true;
-  }
-  return pythonLibDirs.some(
-    (pythonLibDir) =>
-      soFile === pythonLibDir || soFile.startsWith(`${pythonLibDir}${path.sep}`),
-  );
 };
 
 const collectLibsDirsForSo = (soFile, libsDirsBySitePackages) => {
@@ -206,7 +219,11 @@ const patchRuntimeSoFile = (
   soFile,
   { runtimeLibDir, pythonLibDirs, libsDirsBySitePackages, patchelfCommand },
 ) => {
-  if (!shouldPatchRuntimeSoFile(soFile, runtimeLibDir, pythonLibDirs)) {
+  const underPythonLib = pythonLibDirs.some(
+    (pythonLibDir) =>
+      soFile === pythonLibDir || soFile.startsWith(`${pythonLibDir}${path.sep}`),
+  );
+  if (path.dirname(soFile) !== runtimeLibDir && !underPythonLib) {
     return false;
   }
   if (!hasElfMagic(soFile)) {
@@ -265,7 +282,9 @@ export const pruneLinuxTkinterRuntime = (runtimeDir) => {
     return;
   }
 
-  const { runtimeLibDir, pythonDynloadDirs } = scanRuntimeTree(runtimeDir);
+  const { runtimeLibDir, pythonDynloadDirs } = scanRuntimeTree(runtimeDir, {
+    wantPythonDynloadDirs: true,
+  });
   if (!fs.existsSync(runtimeLibDir)) {
     return;
   }
@@ -323,7 +342,14 @@ export const patchLinuxRuntimeRpaths = (runtimeDir) => {
     return;
   }
 
-  const { runtimeLibDir, pythonLibDirs, libsDirsBySitePackages, soFiles } = scanRuntimeTree(runtimeDir);
+  const { runtimeLibDir, pythonLibDirs, libsDirsBySitePackages, soFiles } = scanRuntimeTree(
+    runtimeDir,
+    {
+      wantSoFiles: true,
+      wantLibsDirsBySitePackages: true,
+      wantPythonLibDirs: true,
+    },
+  );
 
   const patchContext = {
     runtimeLibDir,
