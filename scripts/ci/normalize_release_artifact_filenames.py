@@ -7,29 +7,18 @@ import pathlib
 import re
 
 from .lib.artifact_arch import normalize_arch_alias
+from .lib.release_artifacts import (
+    ARCH_PATTERN,
+    ARTIFACT_EXTENSIONS,
+    LOCALE_PATTERN,
+    MACOS_CANONICAL_ARTIFACT_STEM_PATTERN,
+    VERSION_PATTERN,
+    WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT,
+)
 
 NIGHTLY_DATE_PATTERN = re.compile(r"(?:-|_)nightly[._-][0-9]{8}[._-][0-9a-fA-F]{7,40}")
 NIGHTLY_HASH_PATTERN = re.compile(r"(?:-|_)nightly[-_][0-9a-fA-F]{7,40}")
 HEX_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{8,64}$")
-# Known artifact extensions. Some may overlap (for example a future generic
-# ".sig" alongside ".app.tar.gz.sig"), so callers must choose the longest
-# matching suffix at call time instead of relying on declaration order.
-ARTIFACT_EXTENSIONS: tuple[str, ...] = (
-    ".app.tar.gz.sig",
-    ".app.tar.gz",
-    ".exe.sig",
-    ".msi.sig",
-    ".zip.sig",
-    ".rpm",
-    ".deb",
-    ".exe",
-    ".msi",
-    ".zip",
-)
-
-VERSION_PATTERN = r"[0-9A-Za-z.+-]+"
-ARCH_PATTERN = r"[A-Za-z0-9_]+"
-LOCALE_PATTERN = r"[A-Za-z0-9-]+"
 
 # Intentionally match both legacy names (`AstrBot_<version>_<arch>`) and
 # canonical names (`AstrBot_<version>_linux_<arch>`).
@@ -40,10 +29,6 @@ LINUX_CANONICAL_RULE: tuple[re.Pattern[str], str] = (
     LINUX_ARTIFACT_STEM_PATTERN,
     "AstrBot_{version}_linux_{arch}",
 )
-WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT = (
-    rf"^AstrBot_(?P<version>{VERSION_PATTERN})_(?:windows_)?(?P<arch>{ARCH_PATTERN})"
-)
-
 CANONICALIZE_RULES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
     ".rpm": (
         (
@@ -75,17 +60,13 @@ CANONICALIZE_RULES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
     ),
     ".zip": (
         (
-            re.compile(
-                rf"^AstrBot_(?P<version>{VERSION_PATTERN})_macos_(?P<arch>{ARCH_PATTERN})$"
-            ),
+            MACOS_CANONICAL_ARTIFACT_STEM_PATTERN,
             "AstrBot_{version}_macos_{arch}",
         ),
     ),
     ".app.tar.gz": (
         (
-            re.compile(
-                rf"^AstrBot_(?P<version>{VERSION_PATTERN})_macos_(?P<arch>{ARCH_PATTERN})$"
-            ),
+            MACOS_CANONICAL_ARTIFACT_STEM_PATTERN,
             "AstrBot_{version}_macos_{arch}",
         ),
     ),

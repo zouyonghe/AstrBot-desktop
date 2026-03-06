@@ -97,6 +97,80 @@ test('generate_tauri_latest_json rejects unsupported signature artifacts', async
   }
 });
 
+test('generate_tauri_latest_json rejects duplicate platform artifacts', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
+
+  try {
+    const artifactsDir = path.join(tempDir, 'release-artifacts');
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      path.join(artifactsDir, 'AstrBot_4.19.2_windows_amd64_setup.exe.sig'),
+      'canonical-signature',
+      'utf8',
+    );
+    await writeFile(
+      path.join(artifactsDir, 'AstrBot_4.19.2_x64-setup.exe.sig'),
+      'legacy-signature',
+      'utf8',
+    );
+
+    const result = runPythonRaw(generateModule, [
+      '--artifacts-root',
+      artifactsDir,
+      '--repo',
+      'AstrBotDevs/AstrBot-desktop',
+      '--tag',
+      'nightly',
+      '--version',
+      '4.19.2-nightly.20260306.7ac169c5',
+      '--output',
+      path.join(artifactsDir, 'latest.json'),
+    ]);
+
+    assert.notEqual(result.status, 0, 'expected duplicate platform artifacts to fail');
+    assert.match(result.stderr, /duplicate windows artifact/i);
+    assert.match(result.stderr, /windows-x86_64/);
+    assert.doesNotMatch(result.stderr, /Traceback/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('generate_tauri_latest_json surfaces invalid artifact names without traceback noise', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
+
+  try {
+    const artifactsDir = path.join(tempDir, 'release-artifacts');
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      path.join(artifactsDir, 'AstrBot_4.19.2_windows_amd64_portable.exe.sig'),
+      'broken-signature',
+      'utf8',
+    );
+
+    const result = runPythonRaw(generateModule, [
+      '--artifacts-root',
+      artifactsDir,
+      '--repo',
+      'AstrBotDevs/AstrBot-desktop',
+      '--tag',
+      'nightly',
+      '--version',
+      '4.19.2-nightly.20260306.7ac169c5',
+      '--output',
+      path.join(artifactsDir, 'latest.json'),
+    ]);
+
+    assert.notEqual(result.status, 0, 'expected invalid artifact name to fail');
+    assert.match(result.stderr, /unexpected windows artifact name/i);
+    assert.doesNotMatch(result.stderr, /Traceback/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('release artifact normalization keeps updater signatures aligned for latest.json generation', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
 

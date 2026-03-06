@@ -4,60 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 from .lib.artifact_arch import normalize_arch_alias
-
-CANONICAL_VERSION_PATTERN = r"[^_]+"
-LEGACY_VERSION_PATTERN = r".+?"
-CANONICAL_ARCH_PATTERN = r"[^_]+"
-LEGACY_ARCH_PATTERN = r"[^.]+"
-SHORT_SHA_PATTERN = r"[0-9a-fA-F]{8}"
-CANONICAL_NIGHTLY_SUFFIX_PATTERN = rf"(?:_nightly_{SHORT_SHA_PATTERN})?"
-
-
-def compile_pattern(pattern: str) -> re.Pattern[str]:
-    return re.compile(pattern)
-
-
-def build_canonical_platform_pattern(platform: str, artifact_suffix: str) -> re.Pattern[str]:
-    return compile_pattern(
-        rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_{platform}_(?P<arch>{CANONICAL_ARCH_PATTERN}){artifact_suffix}$"
-    )
-
-
-def build_legacy_platform_pattern(platform: str, artifact_suffix: str) -> re.Pattern[str]:
-    return compile_pattern(
-        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_{platform}_(?P<arch>{LEGACY_ARCH_PATTERN}){artifact_suffix}$"
-    )
-
-
-def build_windows_patterns() -> tuple[re.Pattern[str], ...]:
-    return (
-        build_canonical_platform_pattern(
-            "windows", rf"(?:-setup|_setup{CANONICAL_NIGHTLY_SUFFIX_PATTERN})\.exe"
-        ),
-        compile_pattern(
-            rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_(?P<arch>x64|amd64|arm64)-setup\.exe$"
-        ),
-    )
-
-
-def build_macos_archive_patterns() -> tuple[re.Pattern[str], ...]:
-    patterns: list[re.Pattern[str]] = []
-    for archive_extension in (r"\.app\.tar\.gz", r"\.zip"):
-        patterns.append(
-            build_canonical_platform_pattern(
-                "macos", rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}{archive_extension}"
-            )
-        )
-        patterns.append(build_legacy_platform_pattern("macos", archive_extension))
-    return tuple(patterns)
-
-
-WINDOWS_PATTERNS = build_windows_patterns()
-MACOS_ARCHIVE_PATTERNS = build_macos_archive_patterns()
+from .lib.release_artifacts import (
+    MACOS_UPDATER_ARCHIVE_PATTERNS,
+    WINDOWS_UPDATER_PATTERNS,
+    ReleaseArtifactError,
+    match_any,
+)
 
 
 def read_signature(path: Path) -> str:
@@ -71,7 +26,7 @@ def asset_url(repo: str, tag: str, filename: str) -> str:
 def normalize_arch(arch: str, platform: str) -> str:
     normalized = normalize_arch_alias(arch)
     if normalized is None:
-        raise ValueError(f"Unsupported {platform} arch: {arch}")
+        raise ReleaseArtifactError(f"Unsupported {platform} arch: {arch}")
     return normalized
 
 
@@ -81,7 +36,7 @@ def platform_key_for_windows(arch: str) -> str:
         return "windows-x86_64"
     if arch == "arm64":
         return "windows-aarch64"
-    raise ValueError(f"Unsupported Windows arch: {arch}")
+    raise ReleaseArtifactError(f"Unsupported Windows arch: {arch}")
 
 
 def platform_key_for_macos(arch: str) -> str:
@@ -90,15 +45,28 @@ def platform_key_for_macos(arch: str) -> str:
         return "darwin-x86_64"
     if arch == "arm64":
         return "darwin-aarch64"
-    raise ValueError(f"Unsupported macOS arch: {arch}")
+    raise ReleaseArtifactError(f"Unsupported macOS arch: {arch}")
 
 
-def match_any(filename: str, patterns: tuple[re.Pattern[str], ...]) -> re.Match[str] | None:
-    for pattern in patterns:
-        match = pattern.match(filename)
-        if match:
-            return match
-    return None
+def add_platform(
+    platforms: dict[str, dict[str, str]],
+    platform_key: str,
+    platform_label: str,
+    artifact_name: str,
+    signature_path: Path,
+    repo: str,
+    tag: str,
+) -> None:
+    if platform_key in platforms:
+        raise ReleaseArtifactError(
+            f"Duplicate {platform_label} artifact for platform {platform_key!r}: "
+            f"{artifact_name}. Multiple artifacts for the same platform are not allowed."
+        )
+
+    platforms[platform_key] = {
+        "signature": read_signature(signature_path),
+        "url": asset_url(repo, tag, artifact_name),
+    }
 
 
 def collect_platforms(root: Path, repo: str, tag: str) -> dict[str, dict[str, str]]:
@@ -109,40 +77,47 @@ def collect_platforms(root: Path, repo: str, tag: str) -> dict[str, dict[str, st
         sig_name = sig_path.name
         if sig_name.endswith(".exe.sig"):
             exe_name = sig_name[:-4]
-            match = match_any(exe_name, WINDOWS_PATTERNS)
+            match = match_any(exe_name, WINDOWS_UPDATER_PATTERNS)
             if not match:
-                raise ValueError(
+                raise ReleaseArtifactError(
                     "Unexpected Windows artifact name: "
                     f"{exe_name}. Expected canonical or legacy NSIS installer format."
                 )
-            arch = match.group("arch")
-            platform_key = platform_key_for_windows(arch)
-            platforms[platform_key] = {
-                "signature": read_signature(sig_path),
-                "url": asset_url(repo, tag, exe_name),
-            }
+            add_platform(
+                platforms,
+                platform_key_for_windows(match.group("arch")),
+                "Windows",
+                exe_name,
+                sig_path,
+                repo,
+                tag,
+            )
             continue
 
         if sig_name.endswith(".app.tar.gz.sig") or sig_name.endswith(".zip.sig"):
             archive_name = sig_name[:-4]
-            match = match_any(archive_name, MACOS_ARCHIVE_PATTERNS)
+            match = match_any(archive_name, MACOS_UPDATER_ARCHIVE_PATTERNS)
             if not match:
-                raise ValueError(
+                raise ReleaseArtifactError(
                     "Unexpected macOS artifact name: "
                     f"{archive_name}. Expected canonical or legacy macOS updater archive format."
                 )
-            platform_key = platform_key_for_macos(match.group("arch"))
-            platforms[platform_key] = {
-                "signature": read_signature(sig_path),
-                "url": asset_url(repo, tag, archive_name),
-            }
+            add_platform(
+                platforms,
+                platform_key_for_macos(match.group("arch")),
+                "macOS",
+                archive_name,
+                sig_path,
+                repo,
+                tag,
+            )
             continue
 
         unsupported_signature_files.append(sig_name)
 
     if unsupported_signature_files:
         joined = ", ".join(unsupported_signature_files)
-        raise SystemExit(
+        raise ReleaseArtifactError(
             "Unsupported updater signature files under artifacts root: "
             f"{joined}"
         )
@@ -161,9 +136,12 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.artifacts_root)
-    platforms = collect_platforms(root, args.repo, args.tag)
-    if not platforms:
-        raise SystemExit("No updater signatures found under artifacts root")
+    try:
+        platforms = collect_platforms(root, args.repo, args.tag)
+        if not platforms:
+            raise ReleaseArtifactError("No updater signatures found under artifacts root")
+    except ReleaseArtifactError as exc:
+        raise SystemExit(str(exc)) from exc
 
     payload = {
         "version": args.version,
