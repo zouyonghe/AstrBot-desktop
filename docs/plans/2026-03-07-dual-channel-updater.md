@@ -33,7 +33,7 @@
 ### Task 2: Implement channel metadata generation
 
 **Files:**
-- Modify: `scripts/ci/generate-tauri-latest-json.py`
+- Modify: `scripts/ci/generate_tauri_latest_json.py`
 - Modify: `.github/workflows/build-desktop-tauri.yml`
 
 **Step 1:** Teach the manifest generator to emit channel-aware metadata.

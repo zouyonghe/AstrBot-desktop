@@ -8,14 +8,11 @@ import re
 from pathlib import Path
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
+from scripts.ci.lib.nightly_version import NIGHTLY_CANONICAL_FORMAT, NIGHTLY_VERSION_RE
 from scripts.ci.lib.release_artifacts import (
     MACOS_UPDATER_ARCHIVE_PATTERNS,
     WINDOWS_UPDATER_PATTERNS,
     match_any,
-)
-
-NIGHTLY_VERSION_RE = re.compile(
-    r"^(?P<base>[0-9]+(?:\.[0-9]+){1,2})-nightly\.(?P<date>[0-9]{8})\.(?P<sha>[0-9a-fA-F]{8})$"
 )
 
 WINDOWS_PREFIX_ALIAS_RE = re.compile(
@@ -61,7 +58,7 @@ def infer_channel(version: str) -> str:
     if not NIGHTLY_VERSION_RE.match(version):
         raise ValueError(
             "Invalid nightly version "
-            f"{version!r}: expected format <base>-nightly.<YYYYMMDD>.<sha8>"
+            f"{version!r}: expected format {NIGHTLY_CANONICAL_FORMAT}"
         )
     return "nightly"
 
@@ -73,7 +70,7 @@ def derive_nightly_filename_suffix(version: str, channel: str) -> str:
     match = NIGHTLY_VERSION_RE.match(version)
     if not match:
         raise ValueError(
-            "Nightly manifest version must match <base>-nightly.<YYYYMMDD>.<sha>, "
+            f"Nightly manifest version must match {NIGHTLY_CANONICAL_FORMAT}, "
             f"got {version!r}"
         )
     return f"_nightly_{match.group('sha')[:8]}"

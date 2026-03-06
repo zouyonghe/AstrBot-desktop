@@ -14,6 +14,9 @@ FORMAT_SPEC = json.loads(
 
 
 class GenerateTauriLatestJsonTests(unittest.TestCase):
+    def test_nightly_canonical_format_matches_shared_spec(self):
+        self.assertEqual(MODULE.NIGHTLY_CANONICAL_FORMAT, FORMAT_SPEC['canonicalFormat'])
+
     def test_nightly_version_regex_matches_shared_examples(self):
         for raw in FORMAT_SPEC['validExamples']:
             self.assertIsNotNone(MODULE.NIGHTLY_VERSION_RE.fullmatch(raw), raw)
@@ -66,6 +69,9 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
             with self.subTest(version=raw):
                 with self.assertRaisesRegex(ValueError, 'Nightly manifest version must match'):
                     MODULE.derive_nightly_filename_suffix(raw, 'nightly')
+    def test_derive_nightly_filename_suffix_error_mentions_sha8(self):
+        with self.assertRaisesRegex(ValueError, r'<sha8'):
+            MODULE.derive_nightly_filename_suffix('4.29.0-nightly', 'nightly')
 
     def test_build_payload_includes_channel_metadata(self):
         payload = MODULE.build_payload(
@@ -296,6 +302,47 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
             platforms['darwin-aarch64']['url'],
             'https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/v4.29.0/'
             'AstrBot_4.29.0_macos_arm64.zip',
+        )
+
+
+    def test_collect_platforms_accepts_stable_macos_arm64_app_tar_gz(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / 'AstrBot_4.29.0_macos_arm64.app.tar.gz.sig').write_text('sig-mac-app')
+
+            platforms = MODULE.collect_platforms(
+                root,
+                'AstrBotDevs/AstrBot-desktop',
+                'v4.29.0',
+                version='4.29.0',
+                channel='stable',
+            )
+
+        self.assertIn('darwin-aarch64', platforms)
+        self.assertEqual(
+            platforms['darwin-aarch64']['url'],
+            'https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/v4.29.0/'
+            'AstrBot_4.29.0_macos_arm64.app.tar.gz',
+        )
+
+    def test_collect_platforms_accepts_nightly_macos_arm64_app_tar_gz_canonical_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / 'AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz.sig').write_text('sig-mac-nightly')
+
+            platforms = MODULE.collect_platforms(
+                root,
+                'AstrBotDevs/AstrBot-desktop',
+                'nightly',
+                version='4.29.0-nightly.20260307.abcd1234',
+                channel='nightly',
+            )
+
+        self.assertIn('darwin-aarch64', platforms)
+        self.assertEqual(
+            platforms['darwin-aarch64']['url'],
+            'https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/'
+            'AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz',
         )
 
     def test_collect_platforms_invalid_windows_sig_raises(self):
