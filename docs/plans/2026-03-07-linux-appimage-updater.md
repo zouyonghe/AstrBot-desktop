@@ -25,7 +25,7 @@ Cover:
 - Linux with `APPIMAGE` resolves to native updater
 - Linux without `APPIMAGE` resolves to manual download
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run tests to verify they fail**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml --locked updater_mode`
 
