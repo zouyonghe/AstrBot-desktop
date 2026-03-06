@@ -1,6 +1,6 @@
 # Release Updater Artifacts Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Execution note:** Implement this plan task-by-task and verify each step before moving on.
 
 **Goal:** 修复 GitHub Actions release job，使其能拿到正确的 updater 签名与 macOS updater bundle，并成功生成 `latest.json`。
 

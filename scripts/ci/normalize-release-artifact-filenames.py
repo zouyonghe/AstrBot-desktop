@@ -7,6 +7,10 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+
+from artifact_arch import normalize_arch_alias
+
 NIGHTLY_DATE_PATTERN = re.compile(r"(?:-|_)nightly[._-][0-9]{8}[._-][0-9a-fA-F]{7,40}")
 NIGHTLY_HASH_PATTERN = re.compile(r"(?:-|_)nightly[-_][0-9a-fA-F]{7,40}")
 HEX_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{8,64}$")
@@ -95,17 +99,8 @@ CANONICALIZE_RULES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
     ),
 }
 
-ARCH_ALIAS = {
-    "x86_64": "amd64",
-    "x64": "amd64",
-    "amd64": "amd64",
-    "aarch64": "arm64",
-    "arm64": "arm64",
-}
-
-
 def normalize_arch(arch: str, warned_unknown_arches: set[str]) -> str:
-    normalized = ARCH_ALIAS.get(arch)
+    normalized = normalize_arch_alias(arch)
     if normalized is not None:
         return normalized
     if arch not in warned_unknown_arches:

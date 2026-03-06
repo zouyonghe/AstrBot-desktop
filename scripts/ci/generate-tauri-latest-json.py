@@ -8,6 +8,10 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+from artifact_arch import normalize_arch_alias
+
 WINDOWS_PATTERNS = (
     re.compile(
         r"(?P<name>.+?)_(?P<version>[^_]+)_windows_(?P<arch>[^_]+)(?:-setup|_setup(?:_nightly_[0-9a-fA-F]{8})?)\.exe$"
@@ -25,20 +29,6 @@ MACOS_ARCHIVE_PATTERNS = (
     re.compile(r"(?P<name>.+?)_(?P<version>.+?)_macos_(?P<arch>[^.]+)\.zip$"),
 )
 
-WINDOWS_ARCH_ALIASES = {
-    "x64": "amd64",
-    "amd64": "amd64",
-    "arm64": "arm64",
-    "aarch64": "arm64",
-}
-
-MACOS_ARCH_ALIASES = {
-    "x86_64": "amd64",
-    "amd64": "amd64",
-    "arm64": "arm64",
-    "aarch64": "arm64",
-}
-
 
 def read_signature(path: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
@@ -48,15 +38,15 @@ def asset_url(repo: str, tag: str, filename: str) -> str:
     return f"https://github.com/{repo}/releases/download/{tag}/{filename}"
 
 
-def normalize_arch(arch: str, aliases: dict[str, str], platform: str) -> str:
-    normalized = aliases.get(arch)
+def normalize_arch(arch: str, platform: str) -> str:
+    normalized = normalize_arch_alias(arch)
     if normalized is None:
         raise ValueError(f"Unsupported {platform} arch: {arch}")
     return normalized
 
 
 def platform_key_for_windows(arch: str) -> str:
-    arch = normalize_arch(arch, WINDOWS_ARCH_ALIASES, "Windows")
+    arch = normalize_arch(arch, "Windows")
     if arch == "amd64":
         return "windows-x86_64"
     if arch == "arm64":
@@ -65,7 +55,7 @@ def platform_key_for_windows(arch: str) -> str:
 
 
 def platform_key_for_macos(arch: str) -> str:
-    arch = normalize_arch(arch, MACOS_ARCH_ALIASES, "macOS")
+    arch = normalize_arch(arch, "macOS")
     if arch == "amd64":
         return "darwin-x86_64"
     if arch == "arm64":

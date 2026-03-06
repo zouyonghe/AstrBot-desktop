@@ -397,15 +397,19 @@ jobs:
           release_dir="src-tauri/target/${{ matrix.target }}/release/bundle/release-artifacts"
           mkdir -p "${release_dir}"
 
-          shopt -s nullglob
-          updater_archives=("${bundle_dir}"/*.app.tar.gz)
-          if [ "${#updater_archives[@]}" -ne 1 ]; then
-            echo "Expected exactly one macOS updater archive in ${bundle_dir}, found ${#updater_archives[@]}." >&2
-            ls -la "${bundle_dir}" || true
-            exit 1
+          expected_updater_archive="${bundle_dir}/${app_bundle_name}.app.tar.gz"
+          if [ -f "${expected_updater_archive}" ]; then
+            updater_archive="${expected_updater_archive}"
+          else
+            shopt -s nullglob
+            updater_archives=("${bundle_dir}/${app_bundle_name}"*.app.tar.gz)
+            if [ "${#updater_archives[@]}" -ne 1 ]; then
+              echo "Expected a macOS updater archive matching ${app_bundle_name}*.app.tar.gz in ${bundle_dir}, found ${#updater_archives[@]}." >&2
+              ls -la "${bundle_dir}" || true
+              exit 1
+            fi
+            updater_archive="${updater_archives[0]}"
           fi
-
-          updater_archive="${updater_archives[0]}"
           updater_signature="${updater_archive}.sig"
           if [ ! -f "${updater_signature}" ]; then
             echo "Expected macOS updater signature not found: ${updater_signature}" >&2
