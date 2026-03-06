@@ -212,10 +212,10 @@ jobs:
           set -euo pipefail
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" ]]; then
             echo "TAURI signing secrets detected; building deb, rpm, and AppImage bundles."
-            cargo tauri build -v --bundles deb,rpm,appimage
+            cargo tauri build --bundles deb,rpm,appimage
           else
             echo "TAURI signing secrets missing; building deb and rpm bundles only."
-            cargo tauri build -v --bundles deb,rpm
+            cargo tauri build --bundles deb,rpm
           fi
 
       - name: Smoke test backend startup (Linux)
