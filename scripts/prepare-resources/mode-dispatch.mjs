@@ -1,6 +1,25 @@
+import { prepareBackend, prepareWebui } from './mode-tasks.mjs';
+
 const VALID_MODES = new Set(['version', 'webui', 'backend', 'all']);
 
-export const runModeTasks = async (mode, { prepareWebui, prepareBackend }) => {
+const defaultTaskRunner = {
+  prepareWebui,
+  prepareBackend,
+};
+
+export const runModeTasks = async (
+  mode,
+  {
+    sourceDir,
+    projectRoot,
+    sourceRepoRef,
+    isSourceRepoRefVersionTag,
+    isDesktopBridgeExpectationStrict,
+    pythonBuildStandaloneRelease,
+    pythonBuildStandaloneVersion,
+  },
+  taskRunner = defaultTaskRunner,
+) => {
   if (!VALID_MODES.has(mode)) {
     throw new Error(`Unsupported mode: ${mode}. Expected version/webui/backend/all.`);
   }
@@ -9,16 +28,22 @@ export const runModeTasks = async (mode, { prepareWebui, prepareBackend }) => {
     return;
   }
 
-  if (mode === 'webui') {
-    await prepareWebui();
-    return;
+  if (mode === 'webui' || mode === 'all') {
+    await taskRunner.prepareWebui({
+      sourceDir,
+      projectRoot,
+      sourceRepoRef,
+      isSourceRepoRefVersionTag,
+      isDesktopBridgeExpectationStrict,
+    });
   }
 
-  if (mode === 'backend') {
-    await prepareBackend();
-    return;
+  if (mode === 'backend' || mode === 'all') {
+    await taskRunner.prepareBackend({
+      sourceDir,
+      projectRoot,
+      pythonBuildStandaloneRelease,
+      pythonBuildStandaloneVersion,
+    });
   }
-
-  await prepareWebui();
-  await prepareBackend();
 };

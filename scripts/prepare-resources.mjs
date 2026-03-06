@@ -10,8 +10,6 @@ import {
 } from './prepare-resources/source-repo.mjs';
 import {
   ensureStartupShellAssets,
-  prepareBackend,
-  prepareWebui,
 } from './prepare-resources/mode-tasks.mjs';
 import { runModeTasks } from './prepare-resources/mode-dispatch.mjs';
 import { createPrepareResourcesContext } from './prepare-resources/context.mjs';
@@ -31,6 +29,8 @@ const main = async () => {
     sourceRepoUrl,
     sourceRepoRef,
     isSourceRepoRefCommitSha,
+    sourceDirOverrideInput,
+    desktopVersionInput,
     desktopVersionOverride,
     isSourceRepoRefVersionTag,
     isDesktopBridgeExpectationStrict,
@@ -39,9 +39,6 @@ const main = async () => {
   } = context;
   const needsSourceRepo = mode !== 'version' || !desktopVersionOverride;
   await mkdir(path.join(projectRoot, 'resources'), { recursive: true });
-
-  const desktopVersionInput = process.env.ASTRBOT_DESKTOP_VERSION?.trim() || '';
-  const sourceDirOverrideInput = process.env.ASTRBOT_SOURCE_DIR?.trim() || '';
 
   if (desktopVersionInput && desktopVersionInput !== desktopVersionOverride) {
     console.log(
@@ -70,7 +67,7 @@ const main = async () => {
   if (desktopVersionOverride && needsSourceRepo) {
     const sourceVersion = await readAstrbotVersionFromPyproject({ sourceDir });
     if (sourceVersion !== desktopVersionOverride) {
-        console.warn(
+      console.warn(
         `[prepare-resources] Version override drift detected: ASTRBOT_DESKTOP_VERSION=${desktopVersionInput} (normalized=${desktopVersionOverride}), source pyproject version=${sourceVersion} (${sourceDir})`,
       );
     }
@@ -86,21 +83,13 @@ const main = async () => {
   }
 
   await runModeTasks(mode, {
-    prepareWebui: () =>
-      prepareWebui({
-        sourceDir,
-        projectRoot,
-        sourceRepoRef,
-        isSourceRepoRefVersionTag,
-        isDesktopBridgeExpectationStrict,
-      }),
-    prepareBackend: () =>
-      prepareBackend({
-        sourceDir,
-        projectRoot,
-        pythonBuildStandaloneRelease,
-        pythonBuildStandaloneVersion,
-      }),
+    sourceDir,
+    projectRoot,
+    sourceRepoRef,
+    isSourceRepoRefVersionTag,
+    isDesktopBridgeExpectationStrict,
+    pythonBuildStandaloneRelease,
+    pythonBuildStandaloneVersion,
   });
 };
 

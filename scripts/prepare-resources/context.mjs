@@ -48,12 +48,14 @@ export const createPrepareResourcesContext = ({ argv, env, projectRoot, cwd = pr
     mode,
     pythonBuildStandaloneRelease,
     pythonBuildStandaloneVersion,
+    desktopVersionInput,
     desktopVersionOverride,
     isDesktopBridgeExpectationStrict,
     sourceRepoUrl,
     sourceRepoRef,
     isSourceRepoRefCommitSha,
     isSourceRepoRefVersionTag,
+    sourceDirOverrideInput: sourceDirOverride,
     sourceDir,
   };
 };
