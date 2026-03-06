@@ -90,7 +90,7 @@ Verify release-artifact collection still matches the later release job expectati
 ### Task 4: Extend updater manifest generation for AppImage
 
 **Files:**
-- Modify: `scripts/ci/generate-tauri-latest-json.py`
+- Modify: `scripts/ci/generate_tauri_latest_json.py`
 - Test: Python syntax check and, if added, targeted script tests
 
 **Step 1: Add AppImage artifact parsing**
@@ -103,7 +103,7 @@ They remain downloadable release assets but should not appear as native updater 
 
 **Step 3: Verify script syntax**
 
-Run: `python3 -m py_compile scripts/ci/generate-tauri-latest-json.py`
+Run: `python3 -m py_compile scripts/ci/generate_tauri_latest_json.py`
 
 Expected: PASS.
 
@@ -124,7 +124,7 @@ Expected: PASS.
 
 Run:
 - `pnpm run test:prepare-resources`
-- `python3 -m py_compile scripts/ci/generate-tauri-latest-json.py`
+- `python3 -m py_compile scripts/ci/generate_tauri_latest_json.py`
 
 Expected: PASS.
 

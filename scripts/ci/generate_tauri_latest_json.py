@@ -33,21 +33,22 @@ def normalize_arch(arch: str) -> str:
     return normalize_arch_alias(arch) or arch
 
 
-def normalize_and_validate_arch(arch: str, platform: str) -> str:
-    normalized = normalize_arch(arch)
-    if normalized not in ("amd64", "arm64"):
-        raise ValueError(f"Unsupported {platform} arch: {arch}")
-    return normalized
-
-
 def platform_key_for_windows(arch: str) -> str:
-    arch = normalize_and_validate_arch(arch, "Windows")
-    return "windows-x86_64" if arch == "amd64" else "windows-aarch64"
+    arch = normalize_arch(arch)
+    if arch == "amd64":
+        return "windows-x86_64"
+    if arch == "arm64":
+        return "windows-aarch64"
+    raise ValueError(f"Unsupported Windows arch: {arch}")
 
 
 def platform_key_for_macos(arch: str) -> str:
-    arch = normalize_and_validate_arch(arch, "macOS")
-    return "darwin-x86_64" if arch == "amd64" else "darwin-aarch64"
+    arch = normalize_arch(arch)
+    if arch == "amd64":
+        return "darwin-x86_64"
+    if arch == "arm64":
+        return "darwin-aarch64"
+    raise ValueError(f"Unsupported macOS arch: {arch}")
 
 
 def derive_release_metadata(version: str, channel: str | None) -> tuple[str, str, str]:
@@ -70,19 +71,6 @@ def derive_release_metadata(version: str, channel: str | None) -> tuple[str, str
 
     base_version = match.group("base") if match else version
     return effective_channel, base_version, ""
-
-
-def infer_channel(version: str) -> str:
-    """Infer the release channel from version using the same nightly semantics as helpers."""
-    return derive_release_metadata(version, None)[0]
-
-
-def derive_nightly_filename_suffix(version: str, channel: str) -> str:
-    return derive_release_metadata(version, channel)[2]
-
-
-def derive_base_version(version: str) -> str:
-    return derive_release_metadata(version, None)[1]
 
 
 def canonical_windows_filename(name: str, arch: str, version: str, channel: str) -> str:
@@ -220,25 +208,6 @@ def collect_platforms(
     return platforms
 
 
-def build_payload(
-    *,
-    version: str,
-    notes: str,
-    channel: str,
-    base_version: str,
-    release_tag: str,
-    platforms: dict[str, dict[str, str]],
-) -> dict[str, object]:
-    return {
-        "version": version,
-        "notes": notes,
-        "channel": channel,
-        "baseVersion": base_version,
-        "releaseTag": release_tag,
-        "platforms": platforms,
-    }
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-root", required=True)
@@ -268,14 +237,14 @@ def main() -> int:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
-    payload = build_payload(
-        version=args.version,
-        notes=args.notes,
-        channel=channel,
-        base_version=base_version,
-        release_tag=args.tag,
-        platforms=platforms,
-    )
+    payload = {
+        "version": args.version,
+        "notes": args.notes,
+        "channel": channel,
+        "baseVersion": base_version,
+        "releaseTag": args.tag,
+        "platforms": platforms,
+    }
     Path(args.output).write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

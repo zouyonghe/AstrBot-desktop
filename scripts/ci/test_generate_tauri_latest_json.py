@@ -24,13 +24,6 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
         for raw in FORMAT_SPEC['invalidExamples']:
             self.assertIsNone(MODULE.NIGHTLY_VERSION_RE.fullmatch(raw), raw)
 
-    def test_derive_base_version_removes_nightly_suffix(self):
-        self.assertEqual(
-            MODULE.derive_base_version('4.29.0-nightly.20260307.abcd1234'),
-            '4.29.0',
-        )
-        self.assertEqual(MODULE.derive_base_version('4.29.0'), '4.29.0')
-
     def test_normalize_arch_aliases(self):
         self.assertEqual(MODULE.normalize_arch('x86_64'), 'amd64')
         self.assertEqual(MODULE.normalize_arch('x64'), 'amd64')
@@ -46,17 +39,21 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'Unsupported macOS arch: ppc64le'):
             MODULE.platform_key_for_macos('ppc64le')
 
-    def test_derive_nightly_filename_suffix_validation(self):
+    def test_derive_release_metadata_validates_and_returns_expected_values(self):
         self.assertEqual(
-            MODULE.derive_nightly_filename_suffix('4.29.0', 'stable'),
-            '',
+            MODULE.derive_release_metadata('4.29.0', None),
+            ('stable', '4.29.0', ''),
         )
         self.assertEqual(
-            MODULE.derive_nightly_filename_suffix(
+            MODULE.derive_release_metadata('4.29.0-nightly.20260307.abcd1234', None),
+            ('nightly', '4.29.0', '_nightly_abcd1234'),
+        )
+        self.assertEqual(
+            MODULE.derive_release_metadata(
                 '4.29.0-nightly.20260307.abcd1234',
                 'nightly',
             ),
-            '_nightly_abcd1234',
+            ('nightly', '4.29.0', '_nightly_abcd1234'),
         )
 
         invalid_versions = [
@@ -68,51 +65,15 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
         for raw in invalid_versions:
             with self.subTest(version=raw):
                 with self.assertRaisesRegex(ValueError, 'Nightly manifest version must match'):
-                    MODULE.derive_nightly_filename_suffix(raw, 'nightly')
-    def test_derive_nightly_filename_suffix_error_mentions_sha8(self):
+                    MODULE.derive_release_metadata(raw, 'nightly')
+
+    def test_derive_release_metadata_error_mentions_sha8(self):
         with self.assertRaisesRegex(ValueError, r'<sha8'):
-            MODULE.derive_nightly_filename_suffix('4.29.0-nightly', 'nightly')
+            MODULE.derive_release_metadata('4.29.0-nightly', 'nightly')
 
-    def test_build_payload_includes_channel_metadata(self):
-        payload = MODULE.build_payload(
-            version='4.29.0-nightly.20260307.abcd1234',
-            notes='nightly build',
-            channel='nightly',
-            base_version='4.29.0',
-            release_tag='nightly',
-            platforms={
-                'darwin-aarch64': {
-                    'signature': 'sig',
-                    'url': 'https://example.com/AstrBot_4.29.0_macos_arm64.zip',
-                }
-            },
-        )
-
-        self.assertEqual(payload['channel'], 'nightly')
-        self.assertEqual(payload['baseVersion'], '4.29.0')
-        self.assertEqual(payload['releaseTag'], 'nightly')
-
-
-    def test_infer_channel_returns_expected_channels(self):
-        self.assertEqual(MODULE.infer_channel('4.29.0'), 'stable')
-        self.assertEqual(
-            MODULE.infer_channel('4.29.0-nightly.20260307.abcd1234'),
-            'nightly',
-        )
-
-    def test_infer_channel_rejects_malformed_nightly_version(self):
+    def test_derive_release_metadata_rejects_malformed_inferred_nightly(self):
         with self.assertRaisesRegex(ValueError, 'Invalid nightly version'):
-            MODULE.infer_channel('4.29.0-nightly-beta')
-
-    def test_derive_release_metadata_returns_expected_values(self):
-        self.assertEqual(
-            MODULE.derive_release_metadata('4.29.0', None),
-            ('stable', '4.29.0', ''),
-        )
-        self.assertEqual(
-            MODULE.derive_release_metadata('4.29.0-nightly.20260307.abcd1234', None),
-            ('nightly', '4.29.0', '_nightly_abcd1234'),
-        )
+            MODULE.derive_release_metadata('4.29.0-nightly-beta', None)
 
     def test_canonical_windows_filename_outputs_expected_names(self):
         self.assertEqual(
