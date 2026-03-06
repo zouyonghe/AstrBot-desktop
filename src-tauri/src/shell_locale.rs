@@ -25,7 +25,7 @@ pub fn shell_texts_for_locale(locale: &str) -> ShellTexts {
         return ShellTexts {
             tray_hide: "Hide AstrBot",
             tray_show: "Show AstrBot",
-            tray_reload: "Reload",
+            tray_reload: "Reload UI",
             tray_restart_backend: "Restart Backend",
             tray_quit: "Quit",
         };
@@ -34,7 +34,7 @@ pub fn shell_texts_for_locale(locale: &str) -> ShellTexts {
     ShellTexts {
         tray_hide: "隐藏 AstrBot",
         tray_show: "显示 AstrBot",
-        tray_reload: "重新加载",
+        tray_reload: "重载界面",
         tray_restart_backend: "重启后端",
         tray_quit: "退出",
     }
