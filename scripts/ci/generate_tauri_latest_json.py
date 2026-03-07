@@ -135,12 +135,10 @@ def parse_macos_artifact_name(source_name: str) -> tuple[re.Match[str], str]:
         raise ValueError(
             "Unexpected macOS artifact name: "
             f"{source_name}. Expected format: "
-            "<name>_<version>_macos_<arch>.zip or "
             "<name>_<version>_macos_<arch>.app.tar.gz "
             "(nightly builds may append _nightly_<sha> before the extension)."
         )
-    archive_ext = ".app.tar.gz" if source_name.endswith(".app.tar.gz") else ".zip"
-    return match, archive_ext
+    return match, ".app.tar.gz"
 
 
 def parse_linux_appimage_artifact_name(source_name: str) -> re.Match[str]:
@@ -210,7 +208,7 @@ def collect_platforms(
             )
             continue
 
-        if sig_name.endswith(".app.tar.gz.sig") or sig_name.endswith(".zip.sig"):
+        if sig_name.endswith(".app.tar.gz.sig"):
             source_name = sig_name[:-4]
             match, archive_ext = parse_macos_artifact_name(source_name)
             artifact_name = canonical_macos_filename(
