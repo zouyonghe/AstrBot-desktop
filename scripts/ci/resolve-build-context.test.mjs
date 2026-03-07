@@ -3,13 +3,31 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..', '..');
 const resolveScript = path.join(projectRoot, 'scripts/ci/resolve-build-context.sh');
+const fakeVersionSortFixture = path.join(scriptDir, 'fixtures', 'fake-version-sort.py');
+
+const defaultEnv = {
+  ASTRBOT_SOURCE_GIT_URL: 'https://example.com/AstrBot.git',
+  ASTRBOT_SOURCE_GIT_REF: 'master',
+  ASTRBOT_NIGHTLY_SOURCE_GIT_REF: 'master',
+  WORKFLOW_BUILD_MODE: 'tag-poll',
+  WORKFLOW_PUBLISH_RELEASE: 'true',
+  GITHUB_EVENT_NAME: 'workflow_dispatch',
+  GITHUB_TOKEN: 'test-token',
+  GH_REPOSITORY: 'AstrBotDevs/AstrBot-desktop',
+  ASTRBOT_TEST_GIT_TAGS:
+    '1111111111111111111111111111111111111111 refs/tags/v4.18.0|' +
+    '2222222222222222222222222222222222222222 refs/tags/v4.19.0',
+  ASTRBOT_TEST_NIGHTLY_REF: '3333333333333333333333333333333333333333',
+  ASTRBOT_TEST_FETCHED_VERSION: '4.19.0',
+  ASTRBOT_TEST_CURL_HTTP_STATUS: '404',
+};
 
 const parseGithubOutput = async (outputPath) => {
   const raw = await readFile(outputPath, 'utf8');
@@ -27,12 +45,14 @@ const parseGithubOutput = async (outputPath) => {
   return Object.fromEntries(entries);
 };
 
-const createFakeExecutables = async (root) => {
-  const binDir = path.join(root, 'bin');
-  await mkdir(binDir, { recursive: true });
+const writeExecutable = async (filePath, contents) => {
+  await writeFile(filePath, contents, 'utf8');
+  chmodSync(filePath, 0o755);
+};
 
+const createFakeGit = async (binDir) => {
   const gitPath = path.join(binDir, 'git');
-  await writeFile(
+  await writeExecutable(
     gitPath,
     `#!/usr/bin/env bash
 set -euo pipefail
@@ -44,10 +64,6 @@ if [ "\${1-}" = "-C" ]; then
 fi
 
 command_name="\${1-}"
-if [ -z "\${command_name}" ]; then
-  echo "missing git command" >&2
-  exit 1
-fi
 shift || true
 
 case "\${command_name}" in
@@ -70,26 +86,19 @@ case "\${command_name}" in
         ;;
     esac
     ;;
-  init)
-    mkdir -p "\${1-}"
-    ;;
-  remote)
-    if [ "\${1-}" != "add" ]; then
-      printf 'unexpected git remote args: %s\n' "$*" >&2
-      exit 1
-    fi
+  init|remote|checkout)
+    :
     ;;
   fetch)
     if [ -z "\${repo_dir}" ]; then
       echo 'git fetch expected -C <repo_dir>' >&2
       exit 1
     fi
+    mkdir -p "\${repo_dir}"
     cat > "\${repo_dir}/pyproject.toml" <<EOF
 [project]
 version = "\${ASTRBOT_TEST_FETCHED_VERSION:-4.19.0}"
 EOF
-    ;;
-  checkout)
     ;;
   *)
     printf 'unexpected git command: %s %s\n' "\${command_name}" "$*" >&2
@@ -97,42 +106,30 @@ EOF
     ;;
 esac
 `,
-    'utf8',
   );
-  chmodSync(gitPath, 0o755);
+};
 
+const createFakeCurl = async (binDir) => {
   const curlPath = path.join(binDir, 'curl');
-  await writeFile(
+  await writeExecutable(
     curlPath,
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s' "\${ASTRBOT_TEST_CURL_HTTP_STATUS:-404}"
 `,
-    'utf8',
   );
-  chmodSync(curlPath, 0o755);
+};
 
+const createFakeSort = async (binDir) => {
   const sortPath = path.join(binDir, 'sort');
-  await writeFile(
-    sortPath,
-    `#!/usr/bin/env python3
-import re
-import sys
-
-raw_lines = [line.rstrip("\\n") for line in sys.stdin]
-unique = any("u" in arg.lstrip("-") for arg in sys.argv[1:])
-lines = list(dict.fromkeys(raw_lines)) if unique else raw_lines
-
-def version_key(value):
-    return [int(part) if part.isdigit() else part for part in re.split(r"(\\d+)", value)]
-
-for line in sorted(lines, key=version_key):
-    print(line)
-`,
-    'utf8',
-  );
+  await copyFile(fakeVersionSortFixture, sortPath);
   chmodSync(sortPath, 0o755);
+};
 
+const createFakeExecutables = async (root) => {
+  const binDir = path.join(root, 'bin');
+  await mkdir(binDir, { recursive: true });
+  await Promise.all([createFakeGit(binDir), createFakeCurl(binDir), createFakeSort(binDir)]);
   return binDir;
 };
 
@@ -142,28 +139,18 @@ const runResolveBuildContext = async (envOverrides = {}) => {
   try {
     const githubOutputPath = path.join(tempDir, 'github-output.txt');
     const binDir = await createFakeExecutables(tempDir);
+    const env = {
+      ...process.env,
+      ...defaultEnv,
+      ...envOverrides,
+      PATH: `${binDir}:${process.env.PATH}`,
+      GITHUB_OUTPUT: githubOutputPath,
+    };
+
     const result = spawnSync('bash', [resolveScript], {
       cwd: projectRoot,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH}`,
-        ASTRBOT_SOURCE_GIT_URL: 'https://example.com/AstrBot.git',
-        ASTRBOT_SOURCE_GIT_REF: 'master',
-        ASTRBOT_NIGHTLY_SOURCE_GIT_REF: 'master',
-        WORKFLOW_BUILD_MODE: 'tag-poll',
-        WORKFLOW_PUBLISH_RELEASE: 'true',
-        GITHUB_EVENT_NAME: 'workflow_dispatch',
-        GITHUB_TOKEN: 'test-token',
-        GH_REPOSITORY: 'AstrBotDevs/AstrBot-desktop',
-        GITHUB_OUTPUT: githubOutputPath,
-        ASTRBOT_TEST_GIT_TAGS:
-          '1111111111111111111111111111111111111111 refs/tags/v4.18.0|2222222222222222222222222222222222222222 refs/tags/v4.19.0',
-        ASTRBOT_TEST_NIGHTLY_REF: '3333333333333333333333333333333333333333',
-        ASTRBOT_TEST_FETCHED_VERSION: '4.19.0',
-        ASTRBOT_TEST_CURL_HTTP_STATUS: '404',
-        ...envOverrides,
-      },
+      env,
     });
 
     const outputs = result.status === 0 ? await parseGithubOutput(githubOutputPath) : {};
