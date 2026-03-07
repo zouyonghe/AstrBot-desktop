@@ -60,21 +60,10 @@ MACOS_UPDATER_ARCHIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_macos_(?P<arch>{CANONICAL_ARCH_PATTERN})"
         rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}\.app\.tar\.gz$"
     ),
-    # Canonical .zip:
-    # <name>_<version>_macos_<arch>_nightly_<shortsha>.zip
-    re.compile(
-        rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_macos_(?P<arch>{CANONICAL_ARCH_PATTERN})"
-        rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}\.zip$"
-    ),
     # Legacy .app.tar.gz:
     # <name>_<version>_macos_<arch>.app.tar.gz
     re.compile(
         rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_macos_(?P<arch>{LEGACY_ARCH_PATTERN})\.app\.tar\.gz$"
-    ),
-    # Legacy .zip:
-    # <name>_<version>_macos_<arch>.zip
-    re.compile(
-        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_macos_(?P<arch>{LEGACY_ARCH_PATTERN})\.zip$"
     ),
 )
 
