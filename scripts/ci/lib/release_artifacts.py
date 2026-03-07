@@ -20,6 +20,10 @@ ARTIFACT_EXTENSIONS: tuple[str, ...] = (
     ".zip",
 )
 
+MACOS_UPDATER_ARCHIVE_EXTENSION = ".app.tar.gz"
+MACOS_UPDATER_SIGNATURE_EXTENSION = f"{MACOS_UPDATER_ARCHIVE_EXTENSION}.sig"
+MACOS_UPDATER_ARCHIVE_REGEX_FRAGMENT = re.escape(MACOS_UPDATER_ARCHIVE_EXTENSION)
+
 VERSION_PATTERN = r"[0-9A-Za-z.+-]+"
 ARCH_PATTERN = r"[A-Za-z0-9_]+"
 LOCALE_PATTERN = r"[A-Za-z0-9-]+"
@@ -58,23 +62,12 @@ MACOS_UPDATER_ARCHIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # <name>_<version>_macos_<arch>_nightly_<shortsha>.app.tar.gz
     re.compile(
         rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_macos_(?P<arch>{CANONICAL_ARCH_PATTERN})"
-        rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}\.app\.tar\.gz$"
-    ),
-    # Canonical .zip:
-    # <name>_<version>_macos_<arch>_nightly_<shortsha>.zip
-    re.compile(
-        rf"(?P<name>.+?)_(?P<version>{CANONICAL_VERSION_PATTERN})_macos_(?P<arch>{CANONICAL_ARCH_PATTERN})"
-        rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}\.zip$"
+        rf"{CANONICAL_NIGHTLY_SUFFIX_PATTERN}{MACOS_UPDATER_ARCHIVE_REGEX_FRAGMENT}$"
     ),
     # Legacy .app.tar.gz:
     # <name>_<version>_macos_<arch>.app.tar.gz
     re.compile(
-        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_macos_(?P<arch>{LEGACY_ARCH_PATTERN})\.app\.tar\.gz$"
-    ),
-    # Legacy .zip:
-    # <name>_<version>_macos_<arch>.zip
-    re.compile(
-        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_macos_(?P<arch>{LEGACY_ARCH_PATTERN})\.zip$"
+        rf"(?P<name>.+?)_(?P<version>{LEGACY_VERSION_PATTERN})_macos_(?P<arch>{LEGACY_ARCH_PATTERN}){MACOS_UPDATER_ARCHIVE_REGEX_FRAGMENT}$"
     ),
 )
 

@@ -10,10 +10,17 @@ from pathlib import Path
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
 from scripts.ci.lib.nightly_version import NIGHTLY_CANONICAL_FORMAT, NIGHTLY_VERSION_RE
 from scripts.ci.lib.release_artifacts import (
+    ARTIFACT_EXTENSIONS,
     LINUX_APPIMAGE_UPDATER_PATTERNS,
+    MACOS_UPDATER_ARCHIVE_EXTENSION,
     MACOS_UPDATER_ARCHIVE_PATTERNS,
+    MACOS_UPDATER_SIGNATURE_EXTENSION,
     WINDOWS_UPDATER_PATTERNS,
     match_any,
+)
+
+UPDATER_SIGNATURE_EXTENSIONS: tuple[str, ...] = tuple(
+    ext for ext in ARTIFACT_EXTENSIONS if ext.endswith(".sig")
 )
 
 WINDOWS_PREFIX_ALIAS_RE = re.compile(
@@ -98,11 +105,10 @@ def canonical_macos_filename(
     arch: str,
     version: str,
     channel: str,
-    archive_ext: str,
 ) -> str:
     _, base_version, nightly_suffix = derive_release_metadata(version, channel)
     arch = normalize_arch(arch)
-    return f"{name}_{base_version}_macos_{arch}{nightly_suffix}{archive_ext}"
+    return f"{name}_{base_version}_macos_{arch}{nightly_suffix}{MACOS_UPDATER_ARCHIVE_EXTENSION}"
 
 
 def canonical_linux_appimage_filename(
@@ -129,18 +135,16 @@ def parse_windows_artifact_name(source_name: str) -> re.Match[str]:
     )
 
 
-def parse_macos_artifact_name(source_name: str) -> tuple[re.Match[str], str]:
+def parse_macos_artifact_name(source_name: str) -> re.Match[str]:
     match = match_any(source_name, MACOS_UPDATER_ARCHIVE_PATTERNS)
     if not match:
         raise ValueError(
             "Unexpected macOS artifact name: "
             f"{source_name}. Expected format: "
-            "<name>_<version>_macos_<arch>.zip or "
-            "<name>_<version>_macos_<arch>.app.tar.gz "
+            f"<name>_<version>_macos_<arch>{MACOS_UPDATER_ARCHIVE_EXTENSION} "
             "(nightly builds may append _nightly_<sha> before the extension)."
         )
-    archive_ext = ".app.tar.gz" if source_name.endswith(".app.tar.gz") else ".zip"
-    return match, archive_ext
+    return match
 
 
 def parse_linux_appimage_artifact_name(source_name: str) -> re.Match[str]:
@@ -177,6 +181,11 @@ def add_platform(
     }
 
 
+def iter_updater_signature_paths(root: Path):
+    for ext in UPDATER_SIGNATURE_EXTENSIONS:
+        yield from root.rglob(f"*{ext}")
+
+
 def collect_platforms(
     root: Path,
     repo: str,
@@ -186,9 +195,11 @@ def collect_platforms(
     channel: str,
 ) -> dict[str, dict[str, str]]:
     platforms: dict[str, dict[str, str]] = {}
+    # Fail fast on any unknown signature file so release packaging problems are
+    # visible immediately instead of silently producing a partial manifest.
     unsupported_signature_files: list[str] = []
 
-    for sig_path in sorted(root.rglob("*.sig")):
+    for sig_path in sorted(iter_updater_signature_paths(root)):
         sig_name = sig_path.name
         if sig_name.endswith(".exe.sig"):
             source_name = sig_name[:-4]
@@ -210,15 +221,14 @@ def collect_platforms(
             )
             continue
 
-        if sig_name.endswith(".app.tar.gz.sig") or sig_name.endswith(".zip.sig"):
+        if sig_name.endswith(MACOS_UPDATER_SIGNATURE_EXTENSION):
             source_name = sig_name[:-4]
-            match, archive_ext = parse_macos_artifact_name(source_name)
+            match = parse_macos_artifact_name(source_name)
             artifact_name = canonical_macos_filename(
                 match.group("name"),
                 match.group("arch"),
                 version,
                 channel,
-                archive_ext,
             )
             add_platform(
                 platforms,

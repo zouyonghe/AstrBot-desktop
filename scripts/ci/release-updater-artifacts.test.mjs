@@ -63,7 +63,7 @@ print(module.detect_artifact_extension(pathlib.Path('AstrBot.app.tar.gz.sig')) o
   assert.equal(result.stdout.trim(), '.app.tar.gz.sig');
 });
 
-test('generate_tauri_latest_json rejects unsupported signature artifacts', async () => {
+test('generate_tauri_latest_json ignores non-artifact signature files', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
 
   try {
@@ -90,8 +90,8 @@ test('generate_tauri_latest_json rejects unsupported signature artifacts', async
       path.join(artifactsDir, 'latest.json'),
     ]);
 
-    assert.notEqual(result.status, 0, 'expected scripts.ci.generate_tauri_latest_json to fail');
-    assert.match(result.stderr, /unexpected\.sig|unsupported/i);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr.trim(), '');
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

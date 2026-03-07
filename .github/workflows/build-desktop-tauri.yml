@@ -370,44 +370,6 @@ jobs:
           set -euo pipefail
           node scripts/ci/backend-smoke-test.mjs --label "macos-${{ matrix.arch }}"
 
-      - name: Package macOS app as zip
-        env:
-          RESOLVED_APP_BUNDLE_NAME: ${{ steps.resolve_macos_app_bundle.outputs.app_bundle_name }}
-          RESOLVED_APP_BUNDLE_NAME_SOURCE: ${{ steps.resolve_macos_app_bundle.outputs.app_bundle_name_source }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
-          app_bundle_name="${RESOLVED_APP_BUNDLE_NAME}"
-          app_bundle_name_source="${RESOLVED_APP_BUNDLE_NAME_SOURCE}"
-          if [ -z "${app_bundle_name}" ]; then
-            echo "Resolved app bundle name is empty (source=${app_bundle_name_source})." >&2
-            exit 1
-          fi
-          echo "Resolved app bundle name: ${app_bundle_name} (source=${app_bundle_name_source})"
-
-          app_path="${bundle_dir}/${app_bundle_name}.app"
-          if [ ! -d "${app_path}" ]; then
-            shopt -s nullglob
-            app_candidates=("${bundle_dir}"/*.app)
-            if [ "${#app_candidates[@]}" -eq 1 ]; then
-              app_path="${app_candidates[0]}"
-              echo "::warning::Expected ${bundle_dir}/${app_bundle_name}.app not found; fallback to discovered app bundle ${app_path}"
-            else
-              echo "Expected app bundle not found: ${app_path}" >&2
-              ls -la "${bundle_dir}" || true
-              exit 1
-            fi
-          fi
-
-          app_bundle_name="$(basename "${app_path}" .app)"
-          zip_bundle_name="$(printf '%s' "${app_bundle_name}" | tr -cs 'A-Za-z0-9._-' '_')"
-          zip_dir="src-tauri/target/${{ matrix.target }}/release/bundle/zip"
-          zip_path="${zip_dir}/${zip_bundle_name}_${{ needs.resolve_build_context.outputs.astrbot_version }}_macos_${{ matrix.arch }}.zip"
-          mkdir -p "${zip_dir}"
-          ditto -c -k --sequesterRsrc --keepParent "${app_path}" "${zip_path}"
-          echo "Created ${zip_path}"
-
       - name: Collect macOS updater artifacts
         env:
           ASTRBOT_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
@@ -470,7 +432,6 @@ jobs:
           name: astrbot-desktop-tauri-${{ needs.resolve_build_context.outputs.astrbot_version }}-macos-${{ matrix.arch }}
           if-no-files-found: error
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/zip/*.zip
             src-tauri/target/${{ matrix.target }}/release/bundle/release-artifacts/*.app.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/release-artifacts/*.app.tar.gz.sig
 

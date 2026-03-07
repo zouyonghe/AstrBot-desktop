@@ -109,7 +109,6 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
                 "arm64",
                 "4.29.0",
                 "stable",
-                ".app.tar.gz",
             ),
             "AstrBot_4.29.0_macos_arm64.app.tar.gz",
         )
@@ -119,9 +118,8 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
                 "arm64",
                 "4.29.0-nightly.20260307.abcd1234",
                 "nightly",
-                ".zip",
             ),
-            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.zip",
+            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz",
         )
 
     def test_canonical_linux_appimage_filename_outputs_expected_names(self):
@@ -247,37 +245,8 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
             (
                 root / "AstrBot_4.29.0_windows_amd64_setup_nightly_abcd1234.exe.sig"
             ).write_text("sig-win")
-            (root / "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.zip.sig").write_text(
-                "sig-mac"
-            )
-
-            platforms = MODULE.collect_platforms(
-                root,
-                "AstrBotDevs/AstrBot-desktop",
-                "nightly",
-                version="4.29.0-nightly.20260307.abcd1234",
-                channel="nightly",
-            )
-
-        self.assertEqual(
-            platforms["windows-x86_64"]["url"],
-            "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/"
-            "AstrBot_4.29.0_windows_amd64_setup_nightly_abcd1234.exe",
-        )
-        self.assertEqual(
-            platforms["darwin-aarch64"]["url"],
-            "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/"
-            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.zip",
-        )
-
-    def test_collect_platforms_normalizes_nightly_release_filenames(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
             (
-                root / "AstrBot_4.29.0-nightly.20260307.abcd1234_x64-setup.exe.sig"
-            ).write_text("sig-win")
-            (
-                root / "AstrBot_4.29.0-nightly.20260307.abcd1234_macos_aarch64.zip.sig"
+                root / "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz.sig"
             ).write_text("sig-mac")
 
             platforms = MODULE.collect_platforms(
@@ -296,7 +265,37 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
         self.assertEqual(
             platforms["darwin-aarch64"]["url"],
             "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/"
-            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.zip",
+            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz",
+        )
+
+    def test_collect_platforms_normalizes_nightly_release_filenames(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (
+                root / "AstrBot_4.29.0-nightly.20260307.abcd1234_x64-setup.exe.sig"
+            ).write_text("sig-win")
+            (
+                root
+                / "AstrBot_4.29.0-nightly.20260307.abcd1234_macos_aarch64.app.tar.gz.sig"
+            ).write_text("sig-mac")
+
+            platforms = MODULE.collect_platforms(
+                root,
+                "AstrBotDevs/AstrBot-desktop",
+                "nightly",
+                version="4.29.0-nightly.20260307.abcd1234",
+                channel="nightly",
+            )
+
+        self.assertEqual(
+            platforms["windows-x86_64"]["url"],
+            "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/"
+            "AstrBot_4.29.0_windows_amd64_setup_nightly_abcd1234.exe",
+        )
+        self.assertEqual(
+            platforms["darwin-aarch64"]["url"],
+            "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/"
+            "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz",
         )
 
     def test_collect_platforms_accepts_current_canonical_stable_windows_name(self):
@@ -336,26 +335,6 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
             platforms["windows-x86_64"]["url"],
             "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/v4.29.0/"
             "AstrBot_4.29.0_windows_amd64_setup.exe",
-        )
-
-    def test_collect_platforms_accepts_stable_macos_arm64_name(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "AstrBot_4.29.0_macos_arm64.zip.sig").write_text("sig-mac")
-
-            platforms = MODULE.collect_platforms(
-                root,
-                "AstrBotDevs/AstrBot-desktop",
-                "v4.29.0",
-                version="4.29.0",
-                channel="stable",
-            )
-
-        self.assertIn("darwin-aarch64", platforms)
-        self.assertEqual(
-            platforms["darwin-aarch64"]["url"],
-            "https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/v4.29.0/"
-            "AstrBot_4.29.0_macos_arm64.zip",
         )
 
     def test_collect_platforms_accepts_stable_macos_arm64_app_tar_gz(self):
@@ -404,6 +383,106 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
             "AstrBot_4.29.0_macos_arm64_nightly_abcd1234.app.tar.gz",
         )
 
+    def test_collect_platforms_rejects_macos_zip_signature_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot_4.29.0_macos_arm64.zip.sig").write_text("sig-mac")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unsupported updater signature files under artifacts root",
+            ):
+                MODULE.collect_platforms(
+                    root,
+                    "AstrBotDevs/AstrBot-desktop",
+                    "v4.29.0",
+                    version="4.29.0",
+                    channel="stable",
+                )
+
+    def test_collect_platforms_rejects_macos_zip_signature_files_even_with_valid_sig(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot_4.29.0_macos_arm64.app.tar.gz.sig").write_text(
+                "sig-mac-valid"
+            )
+            (root / "AstrBot_4.29.0_macos_arm64.zip.sig").write_text("sig-mac-invalid")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Unsupported updater signature files under artifacts root",
+            ):
+                MODULE.collect_platforms(
+                    root,
+                    "AstrBotDevs/AstrBot-desktop",
+                    "v4.29.0",
+                    version="4.29.0",
+                    channel="stable",
+                )
+
+    def test_collect_platforms_ignores_non_artifact_sig_files_even_with_valid_sig(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot_4.29.0_macos_arm64.app.tar.gz.sig").write_text(
+                "sig-mac-valid"
+            )
+            (root / "unexpected.sig").write_text("sig-unknown")
+
+            platforms = MODULE.collect_platforms(
+                root,
+                "AstrBotDevs/AstrBot-desktop",
+                "v4.29.0",
+                version="4.29.0",
+                channel="stable",
+            )
+
+        self.assertIn("darwin-aarch64", platforms)
+
+    def test_collect_platforms_error_lists_all_unsupported_signature_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot_4.29.0_macos_arm64.zip.sig").write_text("sig-mac-invalid")
+            (root / "AstrBot_4.29.0_windows_amd64_setup.msi.sig").write_text(
+                "sig-win-invalid"
+            )
+
+            with self.assertRaises(ValueError) as cm:
+                MODULE.collect_platforms(
+                    root,
+                    "AstrBotDevs/AstrBot-desktop",
+                    "v4.29.0",
+                    version="4.29.0",
+                    channel="stable",
+                )
+
+            error_message = str(cm.exception)
+            self.assertRegex(error_message, r"AstrBot_4\.29\.0_macos_arm64\.zip\.sig")
+            self.assertRegex(
+                error_message, r"AstrBot_4\.29\.0_windows_amd64_setup\.msi\.sig"
+            )
+
+    def test_collect_platforms_ignores_non_artifact_sig_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot_4.29.0_macos_arm64.app.tar.gz.sig").write_text(
+                "sig-mac-valid"
+            )
+            (root / "notes.sig").write_text("not-an-artifact-signature")
+
+            platforms = MODULE.collect_platforms(
+                root,
+                "AstrBotDevs/AstrBot-desktop",
+                "v4.29.0",
+                version="4.29.0",
+                channel="stable",
+            )
+
+        self.assertIn("darwin-aarch64", platforms)
+
     def test_collect_platforms_accepts_linux_appimage_canonical_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -446,7 +525,7 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
     def test_collect_platforms_invalid_macos_sig_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "AstrBot_4.29.0_macos_.zip.sig").write_text("sig-mac")
+            (root / "AstrBot_4.29.0_macos_.app.tar.gz.sig").write_text("sig-mac")
 
             with self.assertRaisesRegex(ValueError, "Unexpected macOS artifact name"):
                 MODULE.collect_platforms(
@@ -460,7 +539,7 @@ class GenerateTauriLatestJsonTests(unittest.TestCase):
     def test_collect_platforms_rejects_macos_name_without_macos_prefix(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "AstrBot_4.29.0_arm64.zip.sig").write_text("sig-mac")
+            (root / "AstrBot_4.29.0_arm64.app.tar.gz.sig").write_text("sig-mac")
 
             with self.assertRaisesRegex(ValueError, "Unexpected macOS artifact name"):
                 MODULE.collect_platforms(
