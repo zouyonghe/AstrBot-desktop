@@ -15,7 +15,7 @@
 - `.github/`
   - GitHub Actions workflows 与复用 actions。
 - `docs/`
-  - 架构、重构归档、环境变量清单等文档。
+  - 用户、维护与归档文档。
 
 ## 2. Rust 侧当前布局（`src-tauri/src`）
 
@@ -150,16 +150,16 @@
 
 - `architecture.md`
   - 当前子系统边界与主要流程。
+- `development.md`
+  - 本地构建、维护命令、版本同步与发布说明。
+- `data-migration.md`
+  - 桌面端与源码部署之间的数据迁移指南。
 - `repository-structure.md`
   - 文件组织说明（本文档）。
 - `environment-variables.md`
   - 环境变量单一来源文档。
-- `refactor/`
-  - 重构文档子目录（阅读/存档用途）。
-- `refactor/refactor-plan.md`
-  - 重构总计划归档文档。
-- `refactor/refactor-phase2-plan.md` ~ `refactor/refactor-phase10-plan.md`
-  - 分阶段重构计划文档（执行参考 + 归档记录）。
+- `archive/refactor/`
+  - 历史重构计划、设计稿与阶段性归档。
 
 ## 5. 新增代码落位规则
 
