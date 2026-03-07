@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 import runpy
+import site
 import sys
 from pathlib import Path
 
@@ -113,9 +114,30 @@ def preload_windows_runtime_dlls() -> None:
                     continue
 
 
+def configure_python_import_paths() -> None:
+    candidates: list[Path] = []
+    root = os.environ.get("ASTRBOT_ROOT")
+    if root:
+        candidates.append(Path(root).expanduser() / "data" / "site-packages")
+
+    try:
+        user_site = site.getusersitepackages()
+    except Exception:
+        user_site = ""
+    if user_site:
+        candidates.append(Path(user_site))
+
+    for candidate in candidates:
+        candidate_str = str(candidate)
+        if candidate_str in sys.path:
+            continue
+        sys.path.insert(0, candidate_str)
+
+
 configure_stdio_utf8()
 configure_windows_dll_search_path()
 preload_windows_runtime_dlls()
+configure_python_import_paths()
 
 sys.path.insert(0, str(APP_DIR))
 
