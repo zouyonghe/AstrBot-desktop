@@ -3,31 +3,50 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..', '..');
 const resolveScript = path.join(projectRoot, 'scripts/ci/resolve-build-context.sh');
+const fakeGitFixture = path.join(scriptDir, 'fixtures', 'fake-git.sh');
+const fakeCurlFixture = path.join(scriptDir, 'fixtures', 'fake-curl.sh');
 const fakeVersionSortFixture = path.join(scriptDir, 'fixtures', 'fake-version-sort.py');
 
-const defaultEnv = {
+const DEFAULT_TAG_POLL_TAGS =
+  '1111111111111111111111111111111111111111 refs/tags/v4.18.0|' +
+  '2222222222222222222222222222222222222222 refs/tags/v4.19.0';
+
+const baseEnv = {
   ASTRBOT_SOURCE_GIT_URL: 'https://example.com/AstrBot.git',
   ASTRBOT_SOURCE_GIT_REF: 'master',
   ASTRBOT_NIGHTLY_SOURCE_GIT_REF: 'master',
-  WORKFLOW_BUILD_MODE: 'tag-poll',
-  WORKFLOW_PUBLISH_RELEASE: 'true',
   GITHUB_EVENT_NAME: 'workflow_dispatch',
   GITHUB_TOKEN: 'test-token',
   GH_REPOSITORY: 'AstrBotDevs/AstrBot-desktop',
-  ASTRBOT_TEST_GIT_TAGS:
-    '1111111111111111111111111111111111111111 refs/tags/v4.18.0|' +
-    '2222222222222222222222222222222222222222 refs/tags/v4.19.0',
+};
+
+const makeTagPollEnv = (overrides = {}) => ({
+  ...baseEnv,
+  WORKFLOW_BUILD_MODE: 'tag-poll',
+  WORKFLOW_PUBLISH_RELEASE: 'true',
+  ASTRBOT_TEST_GIT_TAGS: DEFAULT_TAG_POLL_TAGS,
   ASTRBOT_TEST_NIGHTLY_REF: '3333333333333333333333333333333333333333',
   ASTRBOT_TEST_FETCHED_VERSION: '4.19.0',
   ASTRBOT_TEST_CURL_HTTP_STATUS: '404',
-};
+  ...overrides,
+});
+
+const makeNightlyEnv = (overrides = {}) => ({
+  ...baseEnv,
+  WORKFLOW_BUILD_MODE: 'nightly',
+  WORKFLOW_PUBLISH_RELEASE: 'true',
+  ASTRBOT_TEST_NIGHTLY_REF: '3333333333333333333333333333333333333333',
+  ASTRBOT_TEST_FETCHED_VERSION: '4.19.0',
+  ASTRBOT_TEST_CURL_HTTP_STATUS: '404',
+  ...overrides,
+});
 
 const parseGithubOutput = async (outputPath) => {
   const raw = await readFile(outputPath, 'utf8');
@@ -45,89 +64,24 @@ const parseGithubOutput = async (outputPath) => {
   return Object.fromEntries(entries);
 };
 
-const writeExecutable = async (filePath, contents) => {
-  await writeFile(filePath, contents, 'utf8');
+const copyFixtureExecutable = async (fixturePath, filePath) => {
+  await copyFile(fixturePath, filePath);
   chmodSync(filePath, 0o755);
 };
 
 const createFakeGit = async (binDir) => {
   const gitPath = path.join(binDir, 'git');
-  await writeExecutable(
-    gitPath,
-    `#!/usr/bin/env bash
-set -euo pipefail
-
-repo_dir=""
-if [ "\${1-}" = "-C" ]; then
-  repo_dir="\${2-}"
-  shift 2
-fi
-
-command_name="\${1-}"
-shift || true
-
-case "\${command_name}" in
-  ls-remote)
-    source_ref="\${2-}"
-    case "\${source_ref}" in
-      refs/tags/*)
-        if [ "\${ASTRBOT_TEST_GIT_TAGS_FAIL:-0}" = "1" ]; then
-          echo 'simulated tag lookup failure' >&2
-          exit 1
-        fi
-        IFS='|' read -r -a entries <<< "\${ASTRBOT_TEST_GIT_TAGS:-}"
-        for entry in "\${entries[@]}"; do
-          [ -n "\${entry}" ] || continue
-          printf '%s\n' "\${entry}"
-        done
-        ;;
-      refs/heads/*)
-        printf '%s %s\n' "\${ASTRBOT_TEST_NIGHTLY_REF:-3333333333333333333333333333333333333333}" "\${source_ref}"
-        ;;
-      *)
-        printf 'unexpected git ls-remote ref: %s\n' "\${source_ref}" >&2
-        exit 1
-        ;;
-    esac
-    ;;
-  init|remote|checkout)
-    :
-    ;;
-  fetch)
-    if [ -z "\${repo_dir}" ]; then
-      echo 'git fetch expected -C <repo_dir>' >&2
-      exit 1
-    fi
-    mkdir -p "\${repo_dir}"
-    cat > "\${repo_dir}/pyproject.toml" <<EOF
-[project]
-version = "\${ASTRBOT_TEST_FETCHED_VERSION:-4.19.0}"
-EOF
-    ;;
-  *)
-    printf 'unexpected git command: %s %s\n' "\${command_name}" "$*" >&2
-    exit 1
-    ;;
-esac
-`,
-  );
+  await copyFixtureExecutable(fakeGitFixture, gitPath);
 };
 
 const createFakeCurl = async (binDir) => {
   const curlPath = path.join(binDir, 'curl');
-  await writeExecutable(
-    curlPath,
-    `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s' "\${ASTRBOT_TEST_CURL_HTTP_STATUS:-404}"
-`,
-  );
+  await copyFixtureExecutable(fakeCurlFixture, curlPath);
 };
 
 const createFakeSort = async (binDir) => {
   const sortPath = path.join(binDir, 'sort');
-  await copyFile(fakeVersionSortFixture, sortPath);
-  chmodSync(sortPath, 0o755);
+  await copyFixtureExecutable(fakeVersionSortFixture, sortPath);
 };
 
 const createFakeExecutables = async (root) => {
@@ -137,37 +91,49 @@ const createFakeExecutables = async (root) => {
   return binDir;
 };
 
-const runResolveBuildContext = async (envOverrides = {}) => {
+const setupSandbox = async (env) => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-resolve-build-context-'));
+  const githubOutputPath = path.join(tempDir, 'github-output.txt');
+  const binDir = await createFakeExecutables(tempDir);
 
-  try {
-    const githubOutputPath = path.join(tempDir, 'github-output.txt');
-    const binDir = await createFakeExecutables(tempDir);
-    const env = {
+  return {
+    tempDir,
+    githubOutputPath,
+    env: {
       ...process.env,
-      ...defaultEnv,
-      ...envOverrides,
+      ...env,
       PATH: `${binDir}:${process.env.PATH}`,
       GITHUB_OUTPUT: githubOutputPath,
-    };
+    },
+  };
+};
 
-    const result = spawnSync('bash', [resolveScript], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      env,
-    });
+const runInSandbox = async (sandbox) => {
+  const result = spawnSync('bash', [resolveScript], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    env: sandbox.env,
+  });
+  const outputs = result.status === 0 ? await parseGithubOutput(sandbox.githubOutputPath) : {};
+  return { result, outputs };
+};
 
-    const outputs = result.status === 0 ? await parseGithubOutput(githubOutputPath) : {};
-    return { result, outputs };
+const withSandbox = async (env, fn) => {
+  const sandbox = await setupSandbox(env);
+
+  try {
+    return await fn(sandbox);
   } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(sandbox.tempDir, { recursive: true, force: true });
   }
 };
 
+const runResolveBuildContext = async (env) => withSandbox(env, runInSandbox);
+
 test('workflow_dispatch tag-poll marks latest only when explicit source ref is the latest upstream tag', async () => {
-  const { result, outputs } = await runResolveBuildContext({
+  const { result, outputs } = await runResolveBuildContext(makeTagPollEnv({
     WORKFLOW_SOURCE_GIT_REF: 'v4.19.0',
-  });
+  }));
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.source_git_ref, 'v4.19.0');
@@ -176,9 +142,9 @@ test('workflow_dispatch tag-poll marks latest only when explicit source ref is t
 });
 
 test('workflow_dispatch tag-poll does not mark latest when explicit source ref is an older upstream tag', async () => {
-  const { result, outputs } = await runResolveBuildContext({
+  const { result, outputs } = await runResolveBuildContext(makeTagPollEnv({
     WORKFLOW_SOURCE_GIT_REF: 'v4.18.0',
-  });
+  }));
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.source_git_ref, 'v4.18.0');
@@ -187,11 +153,11 @@ test('workflow_dispatch tag-poll does not mark latest when explicit source ref i
 });
 
 test('workflow_dispatch tag-poll keeps explicit source ref builds running when tag lookup fails', async () => {
-  const { result, outputs } = await runResolveBuildContext({
+  const { result, outputs } = await runResolveBuildContext(makeTagPollEnv({
     WORKFLOW_SOURCE_GIT_REF: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
     ASTRBOT_TEST_GIT_TAGS_FAIL: '1',
     ASTRBOT_TEST_FETCHED_VERSION: '4.19.7',
-  });
+  }));
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.source_git_ref, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
@@ -200,7 +166,7 @@ test('workflow_dispatch tag-poll keeps explicit source ref builds running when t
 });
 
 test('workflow_dispatch tag-poll marks latest when no override is provided and latest upstream tag is selected', async () => {
-  const { result, outputs } = await runResolveBuildContext();
+  const { result, outputs } = await runResolveBuildContext(makeTagPollEnv());
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.source_git_ref, 'v4.19.0');
@@ -209,13 +175,13 @@ test('workflow_dispatch tag-poll marks latest when no override is provided and l
 });
 
 test('workflow_dispatch tag-poll normalizes annotated latest tags before latest comparison', async () => {
-  const { result, outputs } = await runResolveBuildContext({
+  const { result, outputs } = await runResolveBuildContext(makeTagPollEnv({
     WORKFLOW_SOURCE_GIT_REF: 'v4.19.0',
     ASTRBOT_TEST_GIT_TAGS:
       '1111111111111111111111111111111111111111 refs/tags/v4.18.0|' +
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa refs/tags/v4.19.0|' +
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb refs/tags/v4.19.0^{}',
-  });
+  }));
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.source_git_ref, 'v4.19.0');
@@ -223,10 +189,7 @@ test('workflow_dispatch tag-poll normalizes annotated latest tags before latest 
 });
 
 test('workflow_dispatch nightly never marks latest', async () => {
-  const { result, outputs } = await runResolveBuildContext({
-    WORKFLOW_BUILD_MODE: 'nightly',
-    ASTRBOT_TEST_GIT_TAGS: '',
-  });
+  const { result, outputs } = await runResolveBuildContext(makeNightlyEnv());
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(outputs.build_mode, 'nightly');

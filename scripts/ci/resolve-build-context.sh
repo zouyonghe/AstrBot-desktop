@@ -123,6 +123,32 @@ git_ls_remote_with_retry() {
   return 1
 }
 
+resolve_latest_upstream_tag() {
+  local source_url="$1"
+  local attempts="$2"
+  local sleep_seconds="$3"
+  local tag_remote_output=""
+  local latest_tag=""
+
+  tag_remote_output="$(
+    git_ls_remote_with_retry \
+      "${source_url}" \
+      "refs/tags/*" \
+      "upstream tags refs/tags/*" \
+      "${attempts}" \
+      "${sleep_seconds}"
+  )" || return 1
+
+  latest_tag="$(printf '%s\n' "${tag_remote_output}" \
+    | awk '{print $2}' \
+    | sed -e 's#refs/tags/##' -e 's#\^{}$##' \
+    | LC_ALL=C sort -Vu \
+    | tail -n 1)"
+  [ -n "${latest_tag}" ] || return 1
+
+  printf '%s\n' "${latest_tag}"
+}
+
 source_git_url="${ASTRBOT_SOURCE_GIT_URL}"
 source_git_ref="${ASTRBOT_SOURCE_GIT_REF}"
 nightly_source_git_ref="${ASTRBOT_NIGHTLY_SOURCE_GIT_REF:-master}"
@@ -307,43 +333,14 @@ if [ "${build_mode}" = "nightly" ]; then
   echo "Nightly source resolved from ${nightly_branch}@${source_git_ref} (configured ASTRBOT_NIGHTLY_SOURCE_GIT_REF='${nightly_source_git_ref}')."
 elif [ "${build_mode}" = "tag-poll" ]; then
   if [ "${workflow_source_git_ref_provided}" = "true" ]; then
-    if tag_remote_output="$(
-      git_ls_remote_with_retry \
-        "${source_git_url}" \
-        "refs/tags/*" \
-        "upstream tags refs/tags/*" \
-        "${retry_attempts}" \
-        "${retry_sleep_seconds}"
-    )"; then
-      latest_upstream_tag="$(printf '%s\n' "${tag_remote_output}" \
-        | awk '{print $2}' \
-        | sed -e 's#refs/tags/##' -e 's#\^{}$##' \
-        | sort -Vu \
-        | tail -n 1)"
-      if [ -n "${latest_upstream_tag}" ]; then
-        echo "Latest upstream tag is ${latest_upstream_tag}"
-      else
-        echo "::warning::Unable to normalize latest upstream tag from ${source_git_url}; continuing with release_make_latest=false."
-      fi
+    if latest_upstream_tag="$(resolve_latest_upstream_tag "${source_git_url}" "${retry_attempts}" "${retry_sleep_seconds}")"; then
+      echo "Latest upstream tag is ${latest_upstream_tag}"
     else
       echo "::warning::Unable to resolve latest upstream tag for explicit source ref ${source_git_ref}; continuing with release_make_latest=false."
     fi
     echo "workflow_dispatch tag-poll mode: using explicit source ref override ${source_git_ref}"
   else
-    tag_remote_output="$(
-      git_ls_remote_with_retry \
-        "${source_git_url}" \
-        "refs/tags/*" \
-        "upstream tags refs/tags/*" \
-        "${retry_attempts}" \
-        "${retry_sleep_seconds}"
-    )"
-    latest_upstream_tag="$(printf '%s\n' "${tag_remote_output}" \
-      | awk '{print $2}' \
-      | sed -e 's#refs/tags/##' -e 's#\^{}$##' \
-      | sort -Vu \
-      | tail -n 1)"
-    if [ -z "${latest_upstream_tag}" ]; then
+    if ! latest_upstream_tag="$(resolve_latest_upstream_tag "${source_git_url}" "${retry_attempts}" "${retry_sleep_seconds}")"; then
       echo "Unable to resolve latest tag from ${source_git_url}" >&2
       exit 1
     fi
