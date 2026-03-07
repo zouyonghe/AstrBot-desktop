@@ -17,7 +17,7 @@ if [ -z "${GITHUB_REPOSITORY:-}" ]; then
   exit 1
 fi
 
-default_cleanup_repository="AstrBotDevs/AstrBot-desktop"
+default_cleanup_repository="${GITHUB_REPOSITORY}"
 cleanup_repository="${ASTRBOT_RELEASE_CLEANUP_TARGET_REPOSITORY:-${default_cleanup_repository}}"
 allow_any_repository_flag="$(printf '%s' "${ASTRBOT_RELEASE_CLEANUP_ALLOW_ANY_REPOSITORY:-0}" | tr '[:upper:]' '[:lower:]')"
 case "${allow_any_repository_flag}" in
