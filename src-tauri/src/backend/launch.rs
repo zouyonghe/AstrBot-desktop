@@ -16,6 +16,21 @@ use crate::{
 #[cfg(target_os = "windows")]
 use crate::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
+fn sanitize_packaged_python_environment<F>(command: &mut Command, log: F)
+where
+    F: Fn(&str),
+{
+    for key in ["PYTHONHOME", "PYTHONPATH"] {
+        if env::var_os(key).is_some() {
+            log(&format!(
+                "clearing inherited {} for packaged backend runtime",
+                key
+            ));
+        }
+        command.env_remove(key);
+    }
+}
+
 impl BackendState {
     pub(crate) fn resolve_launch_plan(&self, app: &AppHandle) -> Result<crate::LaunchPlan, String> {
         if let Some(custom_cmd) = env::var("ASTRBOT_BACKEND_CMD")
@@ -96,6 +111,7 @@ impl BackendState {
         }
 
         if plan.packaged_mode {
+            sanitize_packaged_python_environment(&mut command, append_desktop_log);
             command.env("ASTRBOT_DESKTOP_CLIENT", "1");
             if env::var("DASHBOARD_HOST").is_err() && env::var("ASTRBOT_DASHBOARD_HOST").is_err() {
                 command.env("DASHBOARD_HOST", "127.0.0.1");
@@ -178,5 +194,31 @@ impl BackendState {
             self.stop_backend_log_rotation_worker();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::OsStr, process::Command};
+
+    use super::sanitize_packaged_python_environment;
+
+    fn get_command_env_value(command: &Command, key: &str) -> Option<Option<String>> {
+        command
+            .get_envs()
+            .find(|(existing_key, _)| *existing_key == OsStr::new(key))
+            .map(|(_, value)| value.map(|v| v.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn sanitize_packaged_python_environment_marks_python_envs_for_removal() {
+        let mut command = Command::new("sh");
+        command.env("PYTHONHOME", "/tmp/fake-python-home");
+        command.env("PYTHONPATH", "/tmp/fake-python-path");
+
+        sanitize_packaged_python_environment(&mut command, |_| {});
+
+        assert_eq!(get_command_env_value(&command, "PYTHONHOME"), Some(None));
+        assert_eq!(get_command_env_value(&command, "PYTHONPATH"), Some(None));
     }
 }
