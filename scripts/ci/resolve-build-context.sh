@@ -148,7 +148,9 @@ publish_release="false"
 release_tag=""
 release_name=""
 release_prerelease="false"
+release_make_latest="false"
 workflow_source_git_ref_provided="false"
+latest_upstream_tag=""
 
 case "${requested_build_mode}" in
   auto|tag-poll|nightly) ;;
@@ -304,27 +306,29 @@ if [ "${build_mode}" = "nightly" ]; then
   fi
   echo "Nightly source resolved from ${nightly_branch}@${source_git_ref} (configured ASTRBOT_NIGHTLY_SOURCE_GIT_REF='${nightly_source_git_ref}')."
 elif [ "${build_mode}" = "tag-poll" ]; then
+  tag_remote_output="$(
+    git_ls_remote_with_retry \
+      "${source_git_url}" \
+      "refs/tags/*" \
+      "upstream tags refs/tags/*" \
+      "${retry_attempts}" \
+      "${retry_sleep_seconds}"
+  )"
+  latest_upstream_tag="$(printf '%s\n' "${tag_remote_output}" \
+    | awk '{print $2}' \
+    | sed -e 's#refs/tags/##' -e 's#\^{}$##' \
+    | sort -Vu \
+    | tail -n 1)"
+  if [ -z "${latest_upstream_tag}" ]; then
+    echo "Unable to resolve latest tag from ${source_git_url}" >&2
+    exit 1
+  fi
+  echo "Latest upstream tag is ${latest_upstream_tag}"
+
   if [ "${workflow_source_git_ref_provided}" = "true" ]; then
     echo "workflow_dispatch tag-poll mode: using explicit source ref override ${source_git_ref}"
   else
-    tag_remote_output="$(
-      git_ls_remote_with_retry \
-        "${source_git_url}" \
-        "refs/tags/*" \
-        "upstream tags refs/tags/*" \
-        "${retry_attempts}" \
-        "${retry_sleep_seconds}"
-    )"
-    latest_tag="$(printf '%s\n' "${tag_remote_output}" \
-      | awk '{print $2}' \
-      | sed 's#refs/tags/##' \
-      | sort -V \
-      | tail -n 1)"
-    if [ -z "${latest_tag}" ]; then
-      echo "Unable to resolve latest tag from ${source_git_url}" >&2
-      exit 1
-    fi
-    source_git_ref="${latest_tag}"
+    source_git_ref="${latest_upstream_tag}"
     echo "Tag polling run detected latest upstream tag: ${source_git_ref}"
   fi
 
@@ -379,6 +383,9 @@ elif [ "${publish_release}" = "true" ] && [ "${should_build}" = "true" ]; then
   release_tag="v${version}"
   release_name="AstrBot Desktop v${version}"
   release_prerelease="false"
+  if [ "${build_mode}" = "tag-poll" ] && [ -n "${latest_upstream_tag}" ] && [ "${source_git_ref}" = "${latest_upstream_tag}" ]; then
+    release_make_latest="true"
+  fi
 fi
 
 {
@@ -391,6 +398,7 @@ fi
   echo "release_tag=${release_tag}"
   echo "release_name=${release_name}"
   echo "release_prerelease=${release_prerelease}"
+  echo "release_make_latest=${release_make_latest}"
 } >> "${GITHUB_OUTPUT}"
 
 echo "Resolved source: ${source_git_url}@${source_git_ref}"
@@ -400,3 +408,4 @@ echo "Build mode: ${build_mode}"
 echo "Publish release: ${publish_release}"
 echo "Release tag: ${release_tag:-<none>}"
 echo "Release prerelease: ${release_prerelease}"
+echo "Release make_latest: ${release_make_latest}"

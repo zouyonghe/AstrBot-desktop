@@ -57,6 +57,7 @@ jobs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       release_name: ${{ steps.resolve.outputs.release_name }}
       release_prerelease: ${{ steps.resolve.outputs.release_prerelease }}
+      release_make_latest: ${{ steps.resolve.outputs.release_make_latest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -606,7 +607,7 @@ jobs:
             - Windows installer format: `nsis`.
           generate_release_notes: true
           prerelease: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
-          make_latest: ${{ needs.resolve_build_context.outputs.release_prerelease != 'true' }}
+          make_latest: ${{ needs.resolve_build_context.outputs.release_make_latest == 'true' }}
           overwrite_files: true
           files: release-artifacts/**/*
           fail_on_unmatched_files: true
