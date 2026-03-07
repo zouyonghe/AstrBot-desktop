@@ -11,7 +11,7 @@ The repository has already completed a successful first-stage refactor:
 - `src-tauri/src/main.rs` is now a thin entrypoint.
 - Rust runtime logic is split into many focused modules.
 - `scripts/prepare-resources.mjs` is already an orchestration layer instead of a large all-in-one script.
-- Architecture and refactor history are documented in `docs/architecture.md` and `docs/refactor/`.
+- Architecture and refactor history are documented in `docs/architecture.md` and `docs/archive/refactor/`.
 
 This means the main problem is no longer "one huge file". The next problem is that many modules still live at the same architectural level, which makes the system harder to read as a whole.
 
