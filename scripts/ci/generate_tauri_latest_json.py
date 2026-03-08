@@ -11,7 +11,6 @@ from scripts.ci.lib.artifact_arch import normalize_arch_alias
 from scripts.ci.lib.nightly_version import NIGHTLY_CANONICAL_FORMAT, NIGHTLY_VERSION_RE
 from scripts.ci.lib.release_artifacts import (
     ARTIFACT_EXTENSIONS,
-    LINUX_APPIMAGE_UPDATER_PATTERNS,
     MACOS_UPDATER_ARCHIVE_EXTENSION,
     MACOS_UPDATER_ARCHIVE_PATTERNS,
     MACOS_UPDATER_SIGNATURE_EXTENSION,
@@ -59,15 +58,6 @@ def platform_key_for_macos(arch: str) -> str:
     raise ValueError(f"Unsupported macOS arch: {arch}")
 
 
-def platform_key_for_linux_appimage(arch: str) -> str:
-    arch = normalize_arch(arch)
-    if arch == "amd64":
-        return "linux-x86_64-appimage"
-    if arch == "arm64":
-        return "linux-aarch64-appimage"
-    raise ValueError(f"Unsupported Linux AppImage arch: {arch}")
-
-
 def derive_release_metadata(version: str, channel: str | None) -> tuple[str, str, str]:
     inferred_channel = "nightly" if "nightly" in version.lower() else "stable"
     effective_channel = channel or inferred_channel
@@ -111,14 +101,6 @@ def canonical_macos_filename(
     return f"{name}_{base_version}_macos_{arch}{nightly_suffix}{MACOS_UPDATER_ARCHIVE_EXTENSION}"
 
 
-def canonical_linux_appimage_filename(
-    name: str, arch: str, version: str, channel: str
-) -> str:
-    _, base_version, nightly_suffix = derive_release_metadata(version, channel)
-    arch = normalize_arch(arch)
-    return f"{name}_{base_version}_linux_{arch}{nightly_suffix}.AppImage"
-
-
 def parse_windows_artifact_name(source_name: str) -> re.Match[str]:
     match = match_any(source_name, WINDOWS_UPDATER_PATTERNS)
     if match:
@@ -145,19 +127,6 @@ def parse_macos_artifact_name(source_name: str) -> re.Match[str]:
             "(nightly builds may append _nightly_<sha> before the extension)."
         )
     return match
-
-
-def parse_linux_appimage_artifact_name(source_name: str) -> re.Match[str]:
-    match = match_any(source_name, LINUX_APPIMAGE_UPDATER_PATTERNS)
-    if match:
-        return match
-    raise ValueError(
-        "Unexpected Linux AppImage artifact name: "
-        f"{source_name}. Expected format: "
-        "<name>_<version>_linux_<arch>.AppImage or legacy "
-        "<name>_<version>_<arch>.AppImage "
-        "(nightly builds may append _nightly_<sha> before .AppImage)."
-    )
 
 
 def add_platform(
@@ -234,26 +203,6 @@ def collect_platforms(
                 platforms,
                 platform_key_for_macos(match.group("arch")),
                 "macOS",
-                artifact_name,
-                sig_path,
-                repo,
-                tag,
-            )
-            continue
-
-        if sig_name.endswith(".AppImage.sig"):
-            source_name = sig_name[:-4]
-            match = parse_linux_appimage_artifact_name(source_name)
-            artifact_name = canonical_linux_appimage_filename(
-                match.group("name"),
-                match.group("arch"),
-                version,
-                channel,
-            )
-            add_platform(
-                platforms,
-                platform_key_for_linux_appimage(match.group("arch")),
-                "Linux AppImage",
                 artifact_name,
                 sig_path,
                 repo,
