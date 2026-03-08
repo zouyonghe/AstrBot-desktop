@@ -8,9 +8,9 @@ use crate::bridge::updater_messages::{
 };
 use crate::bridge::updater_mode::{resolve_desktop_update_mode, DesktopUpdateMode};
 use crate::bridge::updater_types::{
-    map_manual_download_result, map_manual_download_update_available_result, map_no_update_result,
-    map_update_available_result, map_update_channel_error, map_update_channel_ok,
-    map_update_check_error, map_update_install_error, map_update_install_ok,
+    map_manual_download_no_update_result, map_manual_download_update_available_result,
+    map_no_update_result, map_update_available_result, map_update_channel_error,
+    map_update_channel_ok, map_update_check_error, map_update_install_error, map_update_install_ok,
     DesktopAppUpdateChannelResult, DesktopAppUpdateCheckResult, DesktopAppUpdateResult,
 };
 use crate::{
@@ -61,7 +61,7 @@ fn build_channel_aware_updater(
         .map_err(|error| format!("Failed to initialize updater: {error}"))
 }
 
-fn short_circuit_update_check(
+fn update_check_short_circuit_result(
     mode: DesktopUpdateMode,
     current_version: &str,
 ) -> Option<(&'static str, DesktopAppUpdateCheckResult)> {
@@ -300,7 +300,9 @@ pub(crate) async fn desktop_bridge_check_app_update(
 ) -> DesktopAppUpdateCheckResult {
     let current_version = app_handle.package_info().version.to_string();
     let update_mode = resolve_desktop_update_mode();
-    if let Some((log_message, result)) = short_circuit_update_check(update_mode, &current_version) {
+    if let Some((log_message, result)) =
+        update_check_short_circuit_result(update_mode, &current_version)
+    {
         append_desktop_log(log_message);
         return result;
     }
@@ -320,9 +322,10 @@ pub(crate) async fn desktop_bridge_check_app_update(
             _ => map_update_available_result(&current_version, &update.version),
         },
         Ok(None) => match update_mode {
-            DesktopUpdateMode::ManualDownload => {
-                map_manual_download_result(&current_version, desktop_manual_download_reason())
-            }
+            DesktopUpdateMode::ManualDownload => map_manual_download_no_update_result(
+                &current_version,
+                desktop_manual_download_reason(),
+            ),
             _ => map_no_update_result(&current_version),
         },
         Err(error) => map_update_check_error(
@@ -367,16 +370,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn updater_check_manual_download_mode_does_not_short_circuit() {
+    fn update_check_short_circuit_only_applies_to_unsupported_mode() {
         assert!(
-            short_circuit_update_check(DesktopUpdateMode::ManualDownload, "4.19.2").is_none(),
-            "manual-download mode should still compare remote versions during update checks"
+            update_check_short_circuit_result(DesktopUpdateMode::ManualDownload, "4.19.2")
+                .is_none(),
+            "manual-download mode should keep running the update check"
         );
     }
 
     #[test]
     fn updater_check_manual_download_mode_only_reports_reason_without_forced_update_flag() {
-        let result = crate::bridge::updater_types::map_manual_download_result(
+        let result = crate::bridge::updater_types::map_manual_download_no_update_result(
             "4.19.2",
             crate::bridge::updater_messages::desktop_manual_download_reason(),
         );
@@ -397,7 +401,7 @@ mod tests {
     #[test]
     fn updater_check_mode_returns_unsupported_result() {
         let (log_message, result) =
-            short_circuit_update_check(DesktopUpdateMode::Unsupported, "4.19.2")
+            update_check_short_circuit_result(DesktopUpdateMode::Unsupported, "4.19.2")
                 .expect("unsupported mode should short-circuit update checks");
 
         assert_eq!(

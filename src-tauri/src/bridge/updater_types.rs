@@ -56,6 +56,7 @@ pub(crate) fn map_update_available_result(
     map_update_result(current_version, latest_version, None, true, false)
 }
 
+/// Maps a manual-download install that did find a newer remote release.
 pub(crate) fn map_manual_download_update_available_result(
     current_version: &str,
     latest_version: &str,
@@ -70,7 +71,8 @@ pub(crate) fn map_manual_download_update_available_result(
     )
 }
 
-pub(crate) fn map_manual_download_result(
+/// Maps a manual-download install that checked successfully but found no newer release.
+pub(crate) fn map_manual_download_no_update_result(
     current_version: &str,
     reason: impl Into<String>,
 ) -> DesktopAppUpdateCheckResult {
@@ -191,8 +193,8 @@ mod tests {
     }
 
     #[test]
-    fn map_manual_download_result_keeps_current_version_and_reason() {
-        let result = map_manual_download_result(
+    fn map_manual_download_no_update_result_keeps_current_version_and_reason() {
+        let result = map_manual_download_no_update_result(
             "4.19.2",
             crate::bridge::updater_messages::DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON,
         );
@@ -208,8 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn map_manual_download_result_keeps_manual_download_message_without_update_flag() {
-        let result = map_manual_download_result(
+    fn map_manual_download_no_update_result_keeps_manual_download_message_without_update_flag() {
+        let result = map_manual_download_no_update_result(
             "4.19.2",
             crate::bridge::updater_messages::desktop_manual_download_reason(),
         );
