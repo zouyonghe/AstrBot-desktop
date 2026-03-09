@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "AstrBot",
         "width": 1280,
         "height": 800,
         "minWidth": 980,
         "minHeight": 680,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

@@ -122,6 +122,8 @@ beforeBuildCommand = pnpm run prepare:resources
 3. 准备 `resources/backend`（包括运行时与启动脚本）。
 4. 执行 Tauri 打包。
 
+补充说明：主窗口当前显式设置了 `backgroundThrottling = "disabled"`，用于缓解 macOS 上窗口隐藏或转入后台后 `WKWebView` 被系统节流/挂起导致的前端假死问题。根据当前 Tauri 2 配置能力，该选项在 macOS 14+ 上生效；更早版本的 macOS 会回退到系统默认后台策略。
+
 ## 7. CI 与发布说明
 
 - 定时构建（`schedule`）检测到上游新 tag 时，会先自动同步版本文件并提交，再继续构建。
