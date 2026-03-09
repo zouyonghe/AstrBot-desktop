@@ -305,7 +305,7 @@ test('release artifact normalization keeps updater signatures aligned for latest
   }
 });
 
-test('release artifact normalization canonicalizes linux AppImage assets for latest.json generation', async () => {
+test('release artifact normalization leaves linux AppImage assets unsupported for latest.json generation', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-release-artifacts-'));
 
   try {
@@ -343,29 +343,26 @@ test('release artifact normalization canonicalizes linux AppImage assets for lat
     await access(normalizedLinux, fsConstants.F_OK);
     await access(normalizedLinuxSig, fsConstants.F_OK);
 
-    const outputPath = path.join(artifactsDir, 'latest.json');
-    runPython(
-      generateModule,
-      [
-        '--artifacts-root',
-        artifactsDir,
-        '--repo',
-        'AstrBotDevs/AstrBot-desktop',
-        '--tag',
-        'nightly',
-        '--version',
-        '4.19.2-nightly.20260306.7ac169c5',
-        '--output',
-        outputPath,
-      ],
-      projectRoot,
+    assert.throws(
+      () =>
+        runPython(
+          generateModule,
+          [
+            '--artifacts-root',
+            artifactsDir,
+            '--repo',
+            'AstrBotDevs/AstrBot-desktop',
+            '--tag',
+            'nightly',
+            '--version',
+            '4.19.2-nightly.20260306.7ac169c5',
+            '--output',
+            path.join(artifactsDir, 'latest.json'),
+          ],
+          projectRoot,
+        ),
+      /Unsupported updater signature files under artifacts root/,
     );
-
-    const payload = JSON.parse(await readFile(outputPath, 'utf8'));
-    assert.deepEqual(payload.platforms['linux-aarch64-appimage'], {
-      signature: 'linux-signature',
-      url: 'https://github.com/AstrBotDevs/AstrBot-desktop/releases/download/nightly/AstrBot_4.19.2_linux_arm64_nightly_7ac169c5.AppImage',
-    });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

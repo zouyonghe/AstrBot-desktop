@@ -211,13 +211,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" ]]; then
-            echo "TAURI signing secrets detected; building deb, rpm, and AppImage bundles."
-            cargo tauri build --bundles deb,rpm,appimage
-          else
-            echo "TAURI signing secrets missing; building deb and rpm bundles only."
-            cargo tauri build --bundles deb,rpm
-          fi
+          echo "Building Linux release bundles (deb and rpm only)."
+          cargo tauri build --bundles deb,rpm
 
       - name: Smoke test backend startup (Linux)
         shell: bash
@@ -233,16 +228,6 @@ jobs:
           path: |
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.rpm
-
-      - name: Upload AppImage artifacts (Linux)
-        if: ${{ hashFiles('src-tauri/target/release/bundle/**/*.AppImage', 'src-tauri/target/release/bundle/**/*.AppImage.sig') != '' }}
-        uses: actions/upload-artifact@v6.0.0
-        with:
-          name: astrbot-desktop-tauri-${{ needs.resolve_build_context.outputs.astrbot_version }}-linux-${{ matrix.arch }}-appimage
-          if-no-files-found: ignore
-          path: |
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.AppImage.sig
 
   build-macos:
     needs:
