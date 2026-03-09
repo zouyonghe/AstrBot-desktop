@@ -94,6 +94,54 @@ fn short_circuit_update_install(
     }
 }
 
+fn should_stop_managed_backend_before_update_install(
+    is_windows: bool,
+    has_managed_backend_child: bool,
+) -> bool {
+    is_windows && has_managed_backend_child
+}
+
+fn has_managed_backend_child(state: &BackendState) -> Result<bool, String> {
+    state
+        .child
+        .lock()
+        .map(|guard| guard.is_some())
+        .map_err(|_| "Backend process lock poisoned.".to_string())
+}
+
+fn finalize_native_update_install(
+    stop_backend_before_install: bool,
+    stop_backend: impl FnOnce() -> Result<(), String>,
+    restart_backend_after_failed_install: impl FnOnce() -> Result<(), String>,
+    install_update: impl FnOnce() -> Result<(), String>,
+) -> DesktopAppUpdateResult {
+    let mut backend_stopped = false;
+
+    if stop_backend_before_install {
+        if let Err(error) = stop_backend() {
+            return map_update_install_error(format!(
+                "Failed to stop backend before Windows update install: {error}"
+            ));
+        }
+        backend_stopped = true;
+    }
+
+    match install_update() {
+        Ok(()) => map_update_install_ok(),
+        Err(error) => {
+            if backend_stopped {
+                if let Err(restart_error) = restart_backend_after_failed_install() {
+                    return map_update_install_error(format!(
+                        "Failed to install update: {error}. Failed to restart backend after install failure: {restart_error}"
+                    ));
+                }
+            }
+
+            map_update_install_error(format!("Failed to install update: {error}"))
+        }
+    }
+}
+
 fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
     let trimmed = raw_url.trim();
     if trimmed.is_empty() {
@@ -356,18 +404,53 @@ pub(crate) async fn desktop_bridge_install_app_update(
         Err(error) => return map_update_install_error(format!("Failed to check updates: {error}")),
     };
 
-    match update.download_and_install(|_, _| {}, || {}).await {
-        Ok(()) => {
-            app_handle.request_restart();
-            map_update_install_ok()
+    let bytes = match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => bytes,
+        Err(error) => return map_update_install_error(format!("Failed to download update: {error}")),
+    };
+
+    let state = app_handle.state::<BackendState>();
+    let has_managed_backend = match has_managed_backend_child(&state) {
+        Ok(has_managed_backend) => has_managed_backend,
+        Err(error) => return map_update_install_error(error),
+    };
+    let stop_managed_backend =
+        should_stop_managed_backend_before_update_install(cfg!(target_os = "windows"), has_managed_backend);
+    let restart_plan = if stop_managed_backend {
+        match state.resolve_launch_plan(&app_handle) {
+            Ok(plan) => Some(plan),
+            Err(error) => return map_update_install_error(error),
         }
-        Err(error) => map_update_install_error(format!("Failed to install update: {error}")),
+    } else {
+        None
+    };
+
+    let result = finalize_native_update_install(
+        stop_managed_backend,
+        || state.stop_backend(),
+        || {
+            if let Some(plan) = restart_plan.as_ref() {
+                append_desktop_log(
+                    "update install failed before exit, restarting managed backend",
+                );
+                state.start_backend_process(&app_handle, plan)?;
+                state.wait_for_backend(plan)
+            } else {
+                Ok(())
+            }
+        },
+        || update.install(bytes).map_err(|error| error.to_string()),
+    );
+    if result.ok {
+        app_handle.request_restart();
     }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn update_check_short_circuit_only_applies_to_unsupported_mode() {
@@ -468,5 +551,158 @@ mod tests {
             updater_manifest_log_message(update_channel::UpdateChannel::Nightly, &endpoint),
             "Using updater manifest for nightly channel: https://example.com/nightly.json"
         );
+    }
+
+    #[test]
+    fn finalize_native_update_install_stops_backend_before_windows_install() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let stop_events = Rc::clone(&events);
+        let restart_events = Rc::clone(&events);
+        let install_events = Rc::clone(&events);
+
+        let result = finalize_native_update_install(
+            true,
+            || {
+                stop_events.borrow_mut().push("stop");
+                Ok(())
+            },
+            || {
+                restart_events.borrow_mut().push("restart");
+                Ok(())
+            },
+            || {
+                install_events.borrow_mut().push("install");
+                Ok(())
+            },
+        );
+
+        assert_eq!(*events.borrow(), vec!["stop", "install"]);
+        assert_eq!(result, map_update_install_ok());
+    }
+
+    #[test]
+    fn finalize_native_update_install_short_circuits_when_backend_stop_fails() {
+        let mut install_called = false;
+        let mut restart_called = false;
+
+        let result = finalize_native_update_install(
+            true,
+            || Err("backend still running".to_string()),
+            || {
+                restart_called = true;
+                Ok(())
+            },
+            || {
+                install_called = true;
+                Ok(())
+            },
+        );
+
+        assert!(!install_called);
+        assert!(!restart_called);
+        assert_eq!(
+            result,
+            map_update_install_error(
+                "Failed to stop backend before Windows update install: backend still running"
+            )
+        );
+    }
+
+    #[test]
+    fn finalize_native_update_install_skips_backend_stop_when_not_required() {
+        let mut stop_called = false;
+        let mut restart_called = false;
+        let mut install_called = false;
+
+        let result = finalize_native_update_install(
+            false,
+            || {
+                stop_called = true;
+                Ok(())
+            },
+            || {
+                restart_called = true;
+                Ok(())
+            },
+            || {
+                install_called = true;
+                Ok(())
+            },
+        );
+
+        assert!(!stop_called);
+        assert!(!restart_called);
+        assert!(install_called);
+        assert_eq!(result, map_update_install_ok());
+    }
+
+    #[test]
+    fn finalize_native_update_install_maps_install_errors() {
+        let mut restart_called = false;
+        let result = finalize_native_update_install(
+            false,
+            || Ok(()),
+            || {
+                restart_called = true;
+                Ok(())
+            },
+            || Err("installer launch failed".to_string()),
+        );
+
+        assert!(!restart_called);
+        assert_eq!(
+            result,
+            map_update_install_error("Failed to install update: installer launch failed")
+        );
+    }
+
+    #[test]
+    fn finalize_native_update_install_restarts_backend_after_failed_install() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let stop_events = Rc::clone(&events);
+        let restart_events = Rc::clone(&events);
+
+        let result = finalize_native_update_install(
+            true,
+            || {
+                stop_events.borrow_mut().push("stop");
+                Ok(())
+            },
+            || {
+                restart_events.borrow_mut().push("restart");
+                Ok(())
+            },
+            || Err("installer launch failed".to_string()),
+        );
+
+        assert_eq!(*events.borrow(), vec!["stop", "restart"]);
+        assert_eq!(
+            result,
+            map_update_install_error("Failed to install update: installer launch failed")
+        );
+    }
+
+    #[test]
+    fn finalize_native_update_install_reports_restart_failures_after_install_failure() {
+        let result = finalize_native_update_install(
+            true,
+            || Ok(()),
+            || Err("backend restart timed out".to_string()),
+            || Err("installer launch failed".to_string()),
+        );
+
+        assert_eq!(
+            result,
+            map_update_install_error(
+                "Failed to install update: installer launch failed. Failed to restart backend after install failure: backend restart timed out"
+            )
+        );
+    }
+
+    #[test]
+    fn should_stop_managed_backend_before_update_install_only_for_windows_managed_backend() {
+        assert!(should_stop_managed_backend_before_update_install(true, true));
+        assert!(!should_stop_managed_backend_before_update_install(true, false));
+        assert!(!should_stop_managed_backend_before_update_install(false, true));
     }
 }

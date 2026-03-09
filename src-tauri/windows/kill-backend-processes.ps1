@@ -22,6 +22,7 @@ if ([string]::IsNullOrWhiteSpace($installRootRaw)) {
 $installRoot = $installRootRaw
 $installRootWithSep = $installRoot + [string][char]92
 $currentPid = $PID
+Write-Output "[astrbot-installer] install root: $installRoot"
 $targetProcessNames = @(
     "python.exe",
     "pythonw.exe",
@@ -89,6 +90,8 @@ Get-CimInstance Win32_Process -Filter $nameFilter |
         }
 
         if ($shouldStop) {
+            Write-Output "[astrbot-installer] matched process: pid=$($_.ProcessId) name=$($_.Name) exe=$($_.ExecutablePath)"
+            Write-Output "[astrbot-installer] stopping process: pid=$($_.ProcessId)"
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
     }
