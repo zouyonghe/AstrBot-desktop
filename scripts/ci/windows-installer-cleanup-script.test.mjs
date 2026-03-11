@@ -34,20 +34,53 @@ function findMatchingLineIndex(lines, pattern) {
   return lines.findIndex((line) => pattern.test(line));
 }
 
-function parseNsisDefines(source) {
-  const defines = new Map();
+function getNsisDefineValue(source, defineName) {
+  const definePattern = new RegExp(`^!define\\s+${defineName}(?:\\s+(.+))?$`, 'i');
 
   for (const line of source.split('\n')) {
     const trimmedLine = line.trim();
-    const match = trimmedLine.match(/^!define\s+(\S+)\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
+    const match = trimmedLine.match(definePattern);
 
-    if (match) {
-      defines.set(match[1], match[2] ?? match[3] ?? match[4]);
+    if (!match) {
+      continue;
     }
+
+    const rawValue = match[1]?.trim();
+    if (!rawValue) {
+      throw new Error(`Expected NSIS define ${defineName} to have a simple literal value`);
+    }
+
+    const quotedValueMatch = rawValue.match(/^"([^"]+)"$|^'([^']+)'$/);
+    if (quotedValueMatch) {
+      return quotedValueMatch[1] ?? quotedValueMatch[2];
+    }
+
+    if (!/\s/.test(rawValue)) {
+      return rawValue;
+    }
+
+    throw new Error(`Expected NSIS define ${defineName} to have a simple literal value`);
   }
 
-  return defines;
+  return undefined;
 }
+
+test('extractNsisMacroBody tolerates macro keyword casing and macroend comments', () => {
+  const source = `!MACRO NSIS_RUN_BACKEND_CLEANUP optional\nStrCpy $1 "foo"\n!MacroEnd ; end`;
+
+  assert.deepEqual(extractNsisMacroBody(source, 'NSIS_RUN_BACKEND_CLEANUP'), ['StrCpy $1 "foo"']);
+});
+
+test('getNsisDefineValue fails clearly on unsupported target define syntax', () => {
+  assert.throws(
+    () =>
+      getNsisDefineValue(
+        '!define ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT $INSTDIR\\kill-backend-processes.ps1 extra-token',
+        'ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT'
+      ),
+    /simple literal value/
+  );
+});
 
 test('windows cleanup script emits diagnostic logging for install root and process termination', async () => {
   const source = await readFile(scriptPath, 'utf8');
@@ -68,7 +101,6 @@ test('windows cleanup script only matches processes under the provided install r
 test('nsis installer hook looks for the install-root cleanup script before updater fallback', async () => {
   const source = await readFile(hookPath, 'utf8');
   const macroBody = extractNsisMacroBody(source, 'NSIS_RUN_BACKEND_CLEANUP');
-  const defines = parseNsisDefines(source);
   const primaryIdx = findMatchingLineIndex(
     macroBody,
     /StrCpy\s+\$1\s+"\$\{ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT\}"/
@@ -79,9 +111,12 @@ test('nsis installer hook looks for the install-root cleanup script before updat
     /StrCpy\s+\$1\s+"\$\{ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK\}"/
   );
 
-  assert.equal(defines.get('ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT'), '$INSTDIR\\kill-backend-processes.ps1');
   assert.equal(
-    defines.get('ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK'),
+    getNsisDefineValue(source, 'ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT'),
+    '$INSTDIR\\kill-backend-processes.ps1'
+  );
+  assert.equal(
+    getNsisDefineValue(source, 'ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK'),
     '$INSTDIR\\_up_\\resources\\kill-backend-processes.ps1'
   );
   assert.notEqual(primaryIdx, -1);
