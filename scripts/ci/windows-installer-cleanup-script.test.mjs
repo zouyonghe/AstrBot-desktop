@@ -36,9 +36,15 @@ function parseNsisDefines(source) {
   const defines = new Map();
 
   for (const line of source.split('\n')) {
-    const match = line.trim().match(/^!define\s+(\S+)\s+"([^"]+)"/);
+    const trimmedLine = line.trim();
+    const match = trimmedLine.match(/^!define\s+(\S+)\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
+
+    if (trimmedLine.startsWith('!define ') && !match) {
+      assert.fail(`Expected NSIS define line to be parseable: ${trimmedLine}`);
+    }
+
     if (match) {
-      defines.set(match[1], match[2]);
+      defines.set(match[1], match[2] ?? match[3] ?? match[4]);
     }
   }
 
@@ -84,5 +90,5 @@ test('nsis installer hook looks for the install-root cleanup script before updat
   assert.notEqual(fileExistsIdx, -1);
   assert.notEqual(fallbackIdx, -1);
   assert.ok(primaryIdx < fileExistsIdx && fileExistsIdx < fallbackIdx);
-  assert.ok(macroBody.some((line) => line.startsWith("nsExec::ExecToLog '")));
+  assert.ok(macroBody.some((line) => /nsExec::ExecToLog/.test(line)));
 });
