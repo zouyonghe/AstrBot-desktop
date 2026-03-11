@@ -4,6 +4,8 @@
   IfFileExists "$0" +2 0
     StrCpy $0 "powershell.exe"
   StrCpy $1 "$INSTDIR\kill-backend-processes.ps1"
+  ; During updater-driven installs Tauri can stage the incoming bundle under `_up_\resources`
+  ; before files are copied into the final install root, so keep that path as a fallback.
   IfFileExists "$1" +2 0
     StrCpy $1 "$INSTDIR\_up_\resources\kill-backend-processes.ps1"
   IfFileExists "$1" 0 +3
