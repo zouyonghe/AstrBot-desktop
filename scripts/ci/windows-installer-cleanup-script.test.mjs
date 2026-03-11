@@ -4,19 +4,18 @@ import { readFile } from 'node:fs/promises';
 
 const scriptPath = new URL('../../src-tauri/windows/kill-backend-processes.ps1', import.meta.url);
 const hookPath = new URL('../../src-tauri/windows/nsis-installer-hooks.nsh', import.meta.url);
-const nsisPrimaryCleanupDefine = 'ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT';
-const nsisFallbackCleanupDefine = 'ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK';
-const installRootCleanupPath = '$INSTDIR\\kill-backend-processes.ps1';
-const updaterFallbackCleanupPath = '$INSTDIR\\_up_\\resources\\kill-backend-processes.ps1';
-
-function escapeRegex(value) {
-  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 function extractNsisMacroBody(source, macroName) {
-  const match = source.match(new RegExp(`!macro\\s+${escapeRegex(macroName)}([\\s\\S]*?)!macroend`));
-  assert.ok(match, `Expected NSIS macro ${macroName} to exist`);
-  return match[1];
+  const lines = source.split('\n');
+  const startMarker = `!macro ${macroName}`;
+  const startIdx = lines.findIndex((line) => line.trim() === startMarker);
+
+  assert.notEqual(startIdx, -1, `Expected NSIS macro ${macroName} to exist`);
+
+  const endIdx = lines.findIndex((line, index) => index > startIdx && line.trim() === '!macroend');
+
+  assert.notEqual(endIdx, -1, `Expected end of NSIS macro ${macroName}`);
+  return lines.slice(startIdx + 1, endIdx).map((line) => line.trim());
 }
 
 test('windows cleanup script emits diagnostic logging for install root and process termination', async () => {
@@ -38,26 +37,21 @@ test('windows cleanup script only matches processes under the provided install r
 test('nsis installer hook looks for the install-root cleanup script before updater fallback', async () => {
   const source = await readFile(hookPath, 'utf8');
   const macroBody = extractNsisMacroBody(source, 'NSIS_RUN_BACKEND_CLEANUP');
+  const primaryIdx = macroBody.indexOf('StrCpy $1 "${ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT}"');
+  const fileExistsIdx = macroBody.indexOf('IfFileExists "$1" +2 0');
+  const fallbackIdx = macroBody.indexOf('StrCpy $1 "${ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK}"');
 
   assert.match(
     source,
-    new RegExp(
-      `!define\\s+${escapeRegex(nsisPrimaryCleanupDefine)}\\s+"${escapeRegex(installRootCleanupPath)}"`
-    )
+    /!define\s+ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT\s+"\$INSTDIR\\kill-backend-processes\.ps1"/
   );
   assert.match(
     source,
-    new RegExp(
-      `!define\\s+${escapeRegex(nsisFallbackCleanupDefine)}\\s+"${escapeRegex(updaterFallbackCleanupPath)}"`
-    )
+    /!define\s+ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK\s+"\$INSTDIR\\_up_\\resources\\kill-backend-processes\.ps1"/
   );
-  assert.match(
-    macroBody,
-    new RegExp(
-      `StrCpy\\s+\\$1\\s+"\\$\\{${escapeRegex(nsisPrimaryCleanupDefine)}\\}"[\\s\\S]*?` +
-        `IfFileExists\\s+"\\$1"\\s+\\+2\\s+0[\\s\\S]*?` +
-        `StrCpy\\s+\\$1\\s+"\\$\\{${escapeRegex(nsisFallbackCleanupDefine)}\\}"`
-    )
-  );
-  assert.match(macroBody, /nsExec::ExecToLog\s+'/);
+  assert.notEqual(primaryIdx, -1);
+  assert.notEqual(fileExistsIdx, -1);
+  assert.notEqual(fallbackIdx, -1);
+  assert.ok(primaryIdx < fileExistsIdx && fileExistsIdx < fallbackIdx);
+  assert.ok(macroBody.some((line) => line.startsWith("nsExec::ExecToLog '")));
 });
