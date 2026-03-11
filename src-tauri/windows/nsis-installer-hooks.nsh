@@ -1,13 +1,16 @@
+!define ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT "$INSTDIR\kill-backend-processes.ps1"
+!define ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK "$INSTDIR\_up_\resources\kill-backend-processes.ps1"
+
 !macro NSIS_RUN_BACKEND_CLEANUP
   ; Ensure packaged backend processes do not keep install files locked.
   StrCpy $0 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
   IfFileExists "$0" +2 0
     StrCpy $0 "powershell.exe"
-  StrCpy $1 "$INSTDIR\kill-backend-processes.ps1"
+  StrCpy $1 "${ASTRBOT_BACKEND_CLEANUP_SCRIPT_INSTALL_ROOT}"
   ; During updater-driven installs Tauri can stage the incoming bundle under `_up_\resources`
   ; before files are copied into the final install root, so keep that path as a fallback.
   IfFileExists "$1" +2 0
-    StrCpy $1 "$INSTDIR\_up_\resources\kill-backend-processes.ps1"
+    StrCpy $1 "${ASTRBOT_BACKEND_CLEANUP_SCRIPT_UPDATER_FALLBACK}"
   IfFileExists "$1" 0 +3
     nsExec::ExecToLog '"$0" -NoProfile -ExecutionPolicy Bypass -File "$1" -InstallDir "$INSTDIR"'
     Goto +2
