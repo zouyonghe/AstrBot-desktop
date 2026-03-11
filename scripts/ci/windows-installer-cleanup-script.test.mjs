@@ -23,9 +23,16 @@ test('windows cleanup script only matches processes under the provided install r
 
 test('nsis installer hook looks for the install-root cleanup script before updater fallback', async () => {
   const source = await readFile(hookPath, 'utf8');
+  const installRootPath = '$INSTDIR\\kill-backend-processes.ps1';
+  const updaterFallbackPath = '$INSTDIR\\_up_\\resources\\kill-backend-processes.ps1';
+  const installRootIndex = source.indexOf(installRootPath);
+  const updaterFallbackIndex = source.indexOf(updaterFallbackPath);
 
   assert.match(source, /!macro NSIS_RUN_BACKEND_CLEANUP/);
-  assert.match(source, /StrCpy \$1 "\$INSTDIR\\kill-backend-processes\.ps1"/);
-  assert.match(source, /StrCpy \$1 "\$INSTDIR\\_up_\\resources\\kill-backend-processes\.ps1"/);
-  assert.match(source, /nsExec::ExecToLog/);
+  assert.notEqual(installRootIndex, -1);
+  assert.notEqual(updaterFallbackIndex, -1);
+  assert.ok(installRootIndex < updaterFallbackIndex);
+  assert.match(source, /StrCpy\s+\$1\s+"\$INSTDIR\\kill-backend-processes\.ps1"/);
+  assert.match(source, /StrCpy\s+\$1\s+"\$INSTDIR\\_up_\\resources\\kill-backend-processes\.ps1"/);
+  assert.match(source, /nsExec::ExecToLog\s+'/);
 });
