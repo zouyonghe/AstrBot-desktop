@@ -3,14 +3,27 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const startupShellPath = new URL('../../ui/index.html', import.meta.url);
+const startupCopyConfigPath = new URL('../../ui/startup-copy.js', import.meta.url);
 
-test('startup shell initializes copy from STARTUP_COPY and exposes polite status updates', async () => {
+test('startup shell loads shared copy config, reuses applyStartupMode, and exposes a focused live region', async () => {
   const source = await readFile(startupShellPath, 'utf8');
+  const configSource = await readFile(startupCopyConfigPath, 'utf8').catch(() => '');
 
   assert.match(
     source,
-    /<div class="status"[^>]*aria-live="polite"[^>]*>/,
-    'expected startup status container to announce status changes politely',
+    /<script src="\.\/startup-copy\.js"><\/script>/,
+    'expected startup shell to load a dedicated startup copy config',
+  );
+
+  assert.match(
+    source,
+    /<span id="startup-status"[^>]*role="status"[^>]*aria-live="polite"[^>]*><\/span>/,
+    'expected the status text element to be the polite live region',
+  );
+  assert.doesNotMatch(
+    source,
+    /aria-atomic="true"/,
+    'expected startup shell to avoid verbose atomic live region announcements',
   );
 
   assert.doesNotMatch(
@@ -29,24 +42,40 @@ test('startup shell initializes copy from STARTUP_COPY and exposes polite status
     'expected startup status to be populated from STARTUP_COPY instead of duplicated static copy',
   );
 
-  assert.match(
+  assert.doesNotMatch(
     source,
-    /const\s+initialCopy\s*=\s*resolveStartupCopy\(STARTUP_MODES\.LOADING\);/,
-    'expected the initial render to be sourced from STARTUP_COPY',
+    /const\s+STARTUP_COPY\s*=/,
+    'expected startup copy to be defined in a dedicated config instead of inline',
   );
   assert.match(
     source,
-    /title\.textContent\s*=\s*initialCopy\.title;/,
-    'expected title initial text to be assigned from initialCopy',
+    /const\s+\{\s*STARTUP_MODES,\s*STARTUP_COPY\s*\}\s*=\s*window\.__astrbotStartupShell;/,
+    'expected startup shell to read startup copy from the shared config',
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+initialCopy\s*=/,
+    'expected initial render to reuse applyStartupMode instead of duplicating copy application',
   );
   assert.match(
     source,
-    /desc\.textContent\s*=\s*initialCopy\.desc;/,
-    'expected description initial text to be assigned from initialCopy',
+    /applyStartupMode\(STARTUP_MODES\.LOADING\);/,
+    'expected startup shell to initialize through applyStartupMode',
+  );
+
+  assert.match(
+    configSource,
+    /const\s+STARTUP_MODES\s*=\s*Object\.freeze\(/,
+    'expected shared startup copy config to define startup modes',
   );
   assert.match(
-    source,
-    /status\.textContent\s*=\s*initialCopy\.status;/,
-    'expected status initial text to be assigned from initialCopy',
+    configSource,
+    /const\s+STARTUP_COPY\s*=\s*Object\.freeze\(/,
+    'expected shared startup copy config to define localized startup copy',
+  );
+  assert.match(
+    configSource,
+    /window\.__astrbotStartupShell\s*=\s*Object\.freeze\(/,
+    'expected shared startup copy config to expose startup shell data on window',
   );
 });

@@ -138,51 +138,22 @@
         <div class="bar-wrap" aria-hidden="true">
           <div class="bar"></div>
         </div>
-        <div class="status" aria-live="polite" aria-atomic="true">
+        <div class="status">
           <span class="dot" aria-hidden="true"></span>
-          <span id="startup-status"></span>
+          <span id="startup-status" role="status" aria-live="polite"></span>
         </div>
       </section>
     </main>
+    <script src="./startup-copy.js"></script>
     <script>
       (() => {
         const title = document.getElementById("startup-title");
         const desc = document.getElementById("startup-desc");
         const status = document.getElementById("startup-status");
         if (!title || !desc || !status) return;
+        if (!window.__astrbotStartupShell) return;
 
-        // Keep in sync with startup mode constants in src-tauri/src/startup_mode.rs.
-        const STARTUP_MODES = Object.freeze({
-          LOADING: "loading",
-          PANEL_UPDATE: "panel-update",
-        });
-
-        const STARTUP_COPY = {
-          en: {
-            [STARTUP_MODES.LOADING]: {
-              title: "AstrBot Desktop",
-              desc: "Preparing the runtime, please wait.",
-              status: "Starting core services...",
-            },
-            [STARTUP_MODES.PANEL_UPDATE]: {
-              title: "AstrBot Desktop",
-              desc: "A new panel version is available and is being downloaded and applied.",
-              status: "Syncing panel assets...",
-            },
-          },
-          zh: {
-            [STARTUP_MODES.LOADING]: {
-              title: "AstrBot Desktop",
-              desc: "正在准备运行环境，请稍候。",
-              status: "正在启动核心服务...",
-            },
-            [STARTUP_MODES.PANEL_UPDATE]: {
-              title: "AstrBot Desktop",
-              desc: "检测到新面板版本，正在下载并应用。",
-              status: "正在同步面板资源...",
-            },
-          },
-        };
+        const { STARTUP_MODES, STARTUP_COPY } = window.__astrbotStartupShell;
 
         const resolveLocaleKey = () => {
           const locale =
@@ -198,11 +169,6 @@
           return languageCopy[mode] || languageCopy[STARTUP_MODES.LOADING];
         };
 
-        const initialCopy = resolveStartupCopy(STARTUP_MODES.LOADING);
-        title.textContent = initialCopy.title;
-        desc.textContent = initialCopy.desc;
-        status.textContent = initialCopy.status;
-
         const applyStartupMode = (mode) => {
           const next = resolveStartupCopy(mode);
           title.textContent = next.title;
@@ -213,6 +179,7 @@
         window.__astrbotSetStartupMode = (mode) => {
           applyStartupMode(typeof mode === "string" ? mode : STARTUP_MODES.LOADING);
         };
+        applyStartupMode(STARTUP_MODES.LOADING);
       })();
     </script>
   </body>
