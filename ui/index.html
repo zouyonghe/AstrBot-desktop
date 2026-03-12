@@ -133,14 +133,14 @@
     <main class="shell">
       <section class="panel">
         <img class="brand" src="./astrbot-logo.png" alt="AstrBot Logo" />
-        <h1 id="startup-title" class="title">AstrBot Desktop</h1>
-        <p id="startup-desc" class="desc">Preparing the runtime, please wait.</p>
+        <h1 id="startup-title" class="title"></h1>
+        <p id="startup-desc" class="desc"></p>
         <div class="bar-wrap" aria-hidden="true">
           <div class="bar"></div>
         </div>
-        <div class="status">
+        <div class="status" aria-live="polite" aria-atomic="true">
           <span class="dot" aria-hidden="true"></span>
-          <span id="startup-status">Starting core services...</span>
+          <span id="startup-status"></span>
         </div>
       </section>
     </main>
@@ -198,6 +198,11 @@
           return languageCopy[mode] || languageCopy[STARTUP_MODES.LOADING];
         };
 
+        const initialCopy = resolveStartupCopy(STARTUP_MODES.LOADING);
+        title.textContent = initialCopy.title;
+        desc.textContent = initialCopy.desc;
+        status.textContent = initialCopy.status;
+
         const applyStartupMode = (mode) => {
           const next = resolveStartupCopy(mode);
           title.textContent = next.title;
@@ -208,7 +213,6 @@
         window.__astrbotSetStartupMode = (mode) => {
           applyStartupMode(typeof mode === "string" ? mode : STARTUP_MODES.LOADING);
         };
-        applyStartupMode(STARTUP_MODES.LOADING);
       })();
     </script>
   </body>
