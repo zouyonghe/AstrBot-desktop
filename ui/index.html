@@ -133,14 +133,14 @@
     <main class="shell">
       <section class="panel">
         <img class="brand" src="./astrbot-logo.png" alt="AstrBot Logo" />
-        <h1 id="startup-title" class="title">AstrBot Loading</h1>
-        <p id="startup-desc" class="desc">Initializing runtime, please wait.</p>
+        <h1 id="startup-title" class="title">AstrBot Desktop</h1>
+        <p id="startup-desc" class="desc">Preparing the runtime, please wait.</p>
         <div class="bar-wrap" aria-hidden="true">
           <div class="bar"></div>
         </div>
         <div class="status">
           <span class="dot" aria-hidden="true"></span>
-          <span id="startup-status">Starting AstrBot...</span>
+          <span id="startup-status">Starting core services...</span>
         </div>
       </section>
     </main>
@@ -160,26 +160,26 @@
         const STARTUP_COPY = {
           en: {
             [STARTUP_MODES.LOADING]: {
-              title: "AstrBot Loading",
-              desc: "Initializing runtime, please wait.",
-              status: "Starting AstrBot...",
+              title: "AstrBot Desktop",
+              desc: "Preparing the runtime, please wait.",
+              status: "Starting core services...",
             },
             [STARTUP_MODES.PANEL_UPDATE]: {
-              title: "AstrBot Updating Panel",
-              desc: "Panel updates detected. Downloading and applying now, please keep the app open.",
-              status: "Downloading AstrBot panel updates...",
+              title: "AstrBot Desktop",
+              desc: "A new panel version is available and is being downloaded and applied.",
+              status: "Syncing panel assets...",
             },
           },
           zh: {
             [STARTUP_MODES.LOADING]: {
-              title: "AstrBot 正在加载",
-              desc: "正在启动，请稍候。",
-              status: "正在启动 AstrBot...",
+              title: "AstrBot Desktop",
+              desc: "正在准备运行环境，请稍候。",
+              status: "正在启动核心服务...",
             },
             [STARTUP_MODES.PANEL_UPDATE]: {
-              title: "AstrBot 正在更新面板",
-              desc: "检测到面板更新，正在下载并应用，请耐心等待，不要关闭应用。",
-              status: "正在下载 AstrBot 面板更新...",
+              title: "AstrBot Desktop",
+              desc: "检测到新面板版本，正在下载并应用。",
+              status: "正在同步面板资源...",
             },
           },
         };
