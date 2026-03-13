@@ -464,9 +464,11 @@ jobs:
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
           ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
           ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
+          ASTRBOT_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
+          ASTRBOT_DESKTOP_WINDOWS_ARM_BACKEND_ARCH: ${{ vars.ASTRBOT_DESKTOP_WINDOWS_ARM_BACKEND_ARCH || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         shell: bash

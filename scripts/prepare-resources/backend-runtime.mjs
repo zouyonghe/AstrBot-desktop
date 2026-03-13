@@ -1,23 +1,27 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  BUNDLED_RUNTIME_ARCH_ENV,
+  resolveBundledRuntimeArch,
+} from '../backend/runtime-arch-utils.mjs';
 
-const resolvePbsTarget = () => {
+export const resolvePbsTarget = ({
+  platform = process.platform,
+  arch = process.arch,
+  env = process.env,
+} = {}) => {
   const platformMap = {
     linux: 'linux',
     darwin: 'mac',
     win32: 'windows',
   };
-  const archMap = {
-    x64: 'amd64',
-    arm64: 'arm64',
-  };
 
-  const normalizedPlatform = platformMap[process.platform];
-  const normalizedArch = archMap[process.arch];
+  const normalizedPlatform = platformMap[platform];
+  const normalizedArch = resolveBundledRuntimeArch({ platform, arch, env });
   if (!normalizedPlatform || !normalizedArch) {
     throw new Error(
-      `Unsupported platform/arch for python-build-standalone: ${process.platform}/${process.arch}`,
+      `Unsupported platform/arch for python-build-standalone: ${platform}/${arch}`,
     );
   }
 
@@ -63,6 +67,8 @@ export const ensureBundledRuntime = ({
     return externalRuntime;
   }
 
+  const runtimeArch = resolveBundledRuntimeArch();
+  process.env[BUNDLED_RUNTIME_ARCH_ENV] = runtimeArch;
   const pbsTarget = resolvePbsTarget();
   const runtimeBase = path.join(
     projectRoot,

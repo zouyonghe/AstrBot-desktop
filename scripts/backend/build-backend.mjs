@@ -16,6 +16,7 @@ import {
   patchLinuxRuntimeRpaths,
   pruneLinuxTkinterRuntime,
 } from './runtime-linux-compat-utils.mjs';
+import { isWindowsArm64BundledRuntime } from './runtime-arch-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..', '..');
@@ -474,7 +475,7 @@ const installRuntimeDependencies = (runtimePython) => {
     });
   };
 
-  const isWindowsArm64 = process.platform === 'win32' && process.arch === 'arm64';
+  const isWindowsArm64 = isWindowsArm64BundledRuntime();
   if (isWindowsArm64) {
     // Prefer prebuilt wheels and avoid compiling cryptography from source on Windows ARM64.
     // Fallback versions are configured by env var, for example:

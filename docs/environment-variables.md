@@ -1,6 +1,6 @@
 # AstrBot Desktop 环境变量清单
 
-更新时间：2026-03-07  
+更新时间：2026-03-13  
 主要来源：桌面运行时 Rust 模块（如 `src-tauri/src/backend/config.rs`、`src-tauri/src/update_channel.rs`、`src-tauri/src/bridge/updater_messages.rs`、`src-tauri/src/runtime_paths.rs`、`src-tauri/src/launch_plan.rs`）、资源准备脚本（`scripts/prepare-resources*.mjs`）和发布工作流（`.github/workflows/build-desktop-tauri.yml`）。以下按主要解析/写入阶段分组。
 
 ## 1. 桌面运行时直接读取（`src-tauri`）
@@ -45,6 +45,8 @@
 | `ASTRBOT_PBS_VERSION` | python-build-standalone Python 版本 | 默认 `3.12.12` |
 | `ASTRBOT_DESKTOP_BACKEND_RUNTIME` | 外部后端 runtime 根目录 | 存在时优先使用 |
 | `ASTRBOT_DESKTOP_CPYTHON_HOME` | 外部 CPython 根目录 | 作为 bundled runtime 回退 |
+| `ASTRBOT_DESKTOP_TARGET_ARCH` | 显式指定资源准备阶段要打包的桌面目标架构 | 默认空；未设置时回退到当前 Node 进程架构，CI 建议显式传 `amd64` 或 `arm64` |
+| `ASTRBOT_DESKTOP_WINDOWS_ARM_BACKEND_ARCH` | Windows ARM64 构建时覆盖 bundled backend Python 架构 | 默认空；在 Windows ARM64 上默认为 `amd64`，可显式设为 `amd64`/`x64` 或 `arm64`/`aarch64` |
 
 ## 3. 桌面进程写入给后端子进程
 
@@ -57,6 +59,8 @@
 | 变量 | 用途 | 默认值/行为 |
 | --- | --- | --- |
 | `ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY` | updater 公钥透传到构建步骤 | 默认空；当前由 `.github/workflows/build-desktop-tauri.yml` 传递，Rust 运行时不直接解析 |
+| `ASTRBOT_DESKTOP_TARGET_ARCH` | 透传矩阵目标架构给资源准备脚本 | 默认空；Windows workflow 当前会传 `matrix.arch`，避免在 WOA 上误用仿真层 Node 的 `process.arch` |
+| `ASTRBOT_DESKTOP_WINDOWS_ARM_BACKEND_ARCH` | 透传 Windows ARM64 backend runtime 架构覆盖配置到构建步骤 | 默认空；具体取值与默认行为见第 2 节 |
 
 ## 5. 维护约定
 
