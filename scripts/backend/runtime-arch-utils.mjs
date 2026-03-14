@@ -61,4 +61,18 @@ export const isWindowsArm64BundledRuntime = ({
   platform = process.platform,
   arch = process.arch,
   env = process.env,
-} = {}) => platform === 'win32' && resolveBundledRuntimeArch({ platform, arch, env }) === 'arm64';
+} = {}) => {
+  if (platform !== 'win32') {
+    return false;
+  }
+
+  const hasBundledRuntimeOverride =
+    env[BUNDLED_RUNTIME_ARCH_ENV] !== undefined && String(env[BUNDLED_RUNTIME_ARCH_ENV]).trim();
+  const hasTargetArchOverride =
+    env[DESKTOP_TARGET_ARCH_ENV] !== undefined && String(env[DESKTOP_TARGET_ARCH_ENV]).trim();
+  if (!hasBundledRuntimeOverride && !hasTargetArchOverride && !PROCESS_ARCH_MAP[arch]) {
+    return false;
+  }
+
+  return resolveBundledRuntimeArch({ platform, arch, env }) === 'arm64';
+};

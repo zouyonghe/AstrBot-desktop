@@ -55,3 +55,14 @@ test('isWindowsArm64BundledRuntime uses explicit bundled runtime arch handoff', 
     false,
   );
 });
+
+test('isWindowsArm64BundledRuntime returns false for unsupported Windows host arch', () => {
+  assert.equal(
+    isWindowsArm64BundledRuntime({
+      platform: 'win32',
+      arch: 'ia32',
+      env: {},
+    }),
+    false,
+  );
+});
