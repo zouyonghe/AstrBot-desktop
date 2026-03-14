@@ -29,6 +29,7 @@ where
         }
         command.env_remove(key);
     }
+    command.env("PYTHONNOUSERSITE", "1");
 }
 
 impl BackendState {
@@ -220,5 +221,17 @@ mod tests {
 
         assert_eq!(get_command_env_value(&command, "PYTHONHOME"), Some(None));
         assert_eq!(get_command_env_value(&command, "PYTHONPATH"), Some(None));
+    }
+
+    #[test]
+    fn sanitize_packaged_python_environment_disables_user_site_packages() {
+        let mut command = Command::new("sh");
+
+        sanitize_packaged_python_environment(&mut command, |_| {});
+
+        assert_eq!(
+            get_command_env_value(&command, "PYTHONNOUSERSITE"),
+            Some(Some("1".to_string()))
+        );
     }
 }
