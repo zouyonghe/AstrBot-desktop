@@ -1,6 +1,6 @@
 {
   "name": "astrbot-desktop-tauri",
-  "version": "4.20.0",
+  "version": "4.20.1",
   "description": "AstrBot desktop shell powered by Tauri",
   "private": true,
   "packageManager": "pnpm@10.28.2",
