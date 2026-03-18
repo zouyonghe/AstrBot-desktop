@@ -39,7 +39,7 @@ version = "1.9.1"
   }
 });
 
-test('syncDesktopVersionFiles updates package.json, tauri.conf.json and Cargo.toml', async () => {
+test('syncDesktopVersionFiles updates package.json, tauri.conf.json, Cargo.toml and Cargo.lock', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
   try {
     const srcTauriDir = path.join(tempDir, 'src-tauri');
@@ -60,16 +60,36 @@ test('syncDesktopVersionFiles updates package.json, tauri.conf.json and Cargo.to
       `[package]\nname = "astrbot-desktop-tauri"\nversion = "0.1.0"\n`,
       'utf8',
     );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.lock'),
+      `version = 4
+
+[[package]]
+name = "astrbot-desktop-tauri"
+version = "0.1.0"
+
+[[package]]
+name = "dep"
+version = "9.9.9"
+`,
+      'utf8',
+    );
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
     const packageJson = JSON.parse(await readFile(path.join(tempDir, 'package.json'), 'utf8'));
     const tauriConfig = JSON.parse(await readFile(path.join(srcTauriDir, 'tauri.conf.json'), 'utf8'));
     const cargoToml = await readFile(path.join(srcTauriDir, 'Cargo.toml'), 'utf8');
+    const cargoLock = await readFile(path.join(srcTauriDir, 'Cargo.lock'), 'utf8');
 
     assert.equal(packageJson.version, '2.3.4');
     assert.equal(tauriConfig.version, '2.3.4');
     assert.match(cargoToml, /version\s*=\s*"2.3.4"/);
+    assert.match(
+      cargoLock,
+      /\[\[package\]\]\nname = "astrbot-desktop-tauri"\nversion = "2.3.4"/,
+    );
+    assert.match(cargoLock, /\[\[package\]\]\nname = "dep"\nversion = "9.9.9"/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

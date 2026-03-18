@@ -51,6 +51,7 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
   const packageJsonPath = path.join(projectRoot, 'package.json');
   const tauriConfigPath = path.join(projectRoot, 'src-tauri', 'tauri.conf.json');
   const cargoTomlPath = path.join(projectRoot, 'src-tauri', 'Cargo.toml');
+  const cargoLockPath = path.join(projectRoot, 'src-tauri', 'Cargo.lock');
 
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   if (packageJson.version !== version) {
@@ -72,5 +73,18 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
   const updatedCargoToml = cargoToml.replace(cargoVersionPattern, `$1${version}$2`);
   if (updatedCargoToml !== cargoToml) {
     await writeFile(cargoTomlPath, updatedCargoToml, 'utf8');
+  }
+
+  if (existsSync(cargoLockPath)) {
+    const cargoLock = await readFile(cargoLockPath, 'utf8');
+    const cargoLockVersionPattern =
+      /(\[\[package\]\]\s+name = "astrbot-desktop-tauri"\s+version = ")[^"]+(")/m;
+    if (!cargoLockVersionPattern.test(cargoLock)) {
+      throw new Error(`Cannot update Cargo.lock package version in ${cargoLockPath}`);
+    }
+    const updatedCargoLock = cargoLock.replace(cargoLockVersionPattern, `$1${version}$2`);
+    if (updatedCargoLock !== cargoLock) {
+      await writeFile(cargoLockPath, updatedCargoLock, 'utf8');
+    }
   }
 };
