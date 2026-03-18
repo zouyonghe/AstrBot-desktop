@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+export const DESKTOP_TAURI_CRATE_NAME = 'astrbot-desktop-tauri';
+
 export const normalizeDesktopVersionOverride = (version) => {
   const trimmed = typeof version === 'string' ? version.trim() : '';
   if (!trimmed) {
@@ -47,32 +49,70 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
   throw new Error(`Cannot resolve [project].version from ${pyprojectPath}`);
 };
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
-  const blockPattern = /(^|\n)(\[\[package\]\][\s\S]*?)(?=\n\[\[package\]\]|\s*$)/g;
+  const packageHeaderPattern = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
+  const packageNamePattern = new RegExp(
+    `^\\s*name\\s*=\\s*"${escapeRegExp(packageName)}"\\s*(?:#.*)?$`,
+  );
+  const packageVersionPattern = /^(\s*version\s*=\s*")[^"]+(")(\s*(?:#.*)?)$/;
+  const lines = cargoLock.split(/\r?\n/);
 
   let foundTargetPackage = false;
   let foundTargetVersion = false;
 
-  const updatedCargoLock = cargoLock.replace(blockPattern, (match, prefix, block) => {
-    if (!new RegExp(`^name = "${packageName}"$`, 'm').test(block)) {
-      return match;
+  const updateBlock = (startIndex, endIndex) => {
+    let packageNameLineIndex = -1;
+
+    for (let index = startIndex + 1; index < endIndex; index += 1) {
+      if (packageNamePattern.test(lines[index])) {
+        packageNameLineIndex = index;
+        break;
+      }
+    }
+
+    if (packageNameLineIndex === -1) {
+      return false;
     }
 
     foundTargetPackage = true;
-    const versionPattern = /^version = "[^"]+"$/m;
-    if (!versionPattern.test(block)) {
-      return match;
+
+    for (let index = packageNameLineIndex + 1; index < endIndex; index += 1) {
+      if (packageHeaderPattern.test(lines[index])) {
+        break;
+      }
+      if (!packageVersionPattern.test(lines[index])) {
+        continue;
+      }
+
+      foundTargetVersion = true;
+      lines[index] = lines[index].replace(packageVersionPattern, `$1${version}$2$3`);
+      return true;
     }
-    foundTargetVersion = true;
-    const updatedBlock = block.replace(versionPattern, `version = "${version}"`);
-    return `${prefix}${updatedBlock}`;
-  });
+
+    return false;
+  };
+
+  let blockStartIndex = -1;
+  for (let index = 0; index <= lines.length; index += 1) {
+    const isBoundary = index === lines.length || packageHeaderPattern.test(lines[index]);
+    if (!isBoundary) {
+      continue;
+    }
+
+    if (blockStartIndex !== -1 && updateBlock(blockStartIndex, index)) {
+      break;
+    }
+
+    blockStartIndex = index;
+  }
 
   if (!foundTargetPackage || !foundTargetVersion) {
     throw new Error(`Cannot update Cargo.lock package version for ${packageName}`);
   }
 
-  return updatedCargoLock;
+  return lines.join(cargoLock.includes('\r\n') ? '\r\n' : '\n');
 };
 
 export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
@@ -107,7 +147,7 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
     const cargoLock = await readFile(cargoLockPath, 'utf8');
     const updatedCargoLock = updateCargoLockPackageVersion({
       cargoLock,
-      packageName: 'astrbot-desktop-tauri',
+      packageName: DESKTOP_TAURI_CRATE_NAME,
       version,
     });
     if (updatedCargoLock !== cargoLock) {

@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DESKTOP_TAURI_CRATE_NAME,
   normalizeDesktopVersionOverride,
   readAstrbotVersionFromPyproject,
   syncDesktopVersionFiles,
@@ -57,7 +58,7 @@ test('syncDesktopVersionFiles updates package.json, tauri.conf.json, Cargo.toml 
     );
     await writeFile(
       path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "astrbot-desktop-tauri"\nversion = "0.1.0"\n`,
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
       'utf8',
     );
     await writeFile(
@@ -65,7 +66,7 @@ test('syncDesktopVersionFiles updates package.json, tauri.conf.json, Cargo.toml 
       `version = 4
 
 [[package]]
-name = "astrbot-desktop-tauri"
+name = "${DESKTOP_TAURI_CRATE_NAME}"
 version = "0.1.0"
 
 [[package]]
@@ -87,7 +88,7 @@ version = "9.9.9"
     assert.match(cargoToml, /version\s*=\s*"2.3.4"/);
     assert.match(
       cargoLock,
-      /\[\[package\]\]\nname = "astrbot-desktop-tauri"\nversion = "2.3.4"/,
+      new RegExp(`\\[\\[package\\]\\]\\nname = "${DESKTOP_TAURI_CRATE_NAME}"\\nversion = "2.3.4"`),
     );
     assert.match(cargoLock, /\[\[package\]\]\nname = "dep"\nversion = "9.9.9"/);
   } finally {
@@ -113,7 +114,7 @@ test('syncDesktopVersionFiles tolerates extra Cargo.lock fields between package 
     );
     await writeFile(
       path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "astrbot-desktop-tauri"\nversion = "0.1.0"\n`,
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
       'utf8',
     );
     await writeFile(
@@ -121,7 +122,7 @@ test('syncDesktopVersionFiles tolerates extra Cargo.lock fields between package 
       `version = 4
 
 [[package]]
-name = "astrbot-desktop-tauri"
+name = "${DESKTOP_TAURI_CRATE_NAME}"
 source = "path+file:///workspace/src-tauri"
 version = "0.1.0"
 dependencies = [
@@ -142,11 +143,64 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
     assert.match(
       cargoLock,
-      /\[\[package\]\]\nname = "astrbot-desktop-tauri"\nsource = "path\+file:\/\/\/workspace\/src-tauri"\nversion = "2.3.4"/,
+      new RegExp(
+        String.raw`\[\[package\]\]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nsource = "path\+file:///workspace/src-tauri"\nversion = "2.3.4"`,
+      ),
     );
     assert.match(
       cargoLock,
       /\[\[package\]\]\nname = "dep"\nversion = "9.9.9"\nsource = "registry\+https:\/\/github.com\/rust-lang\/crates.io-index"/,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('syncDesktopVersionFiles preserves trailing Cargo.lock comments and spaces on name/version lines', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  try {
+    const srcTauriDir = path.join(tempDir, 'src-tauri');
+    await mkdir(srcTauriDir, { recursive: true });
+
+    await writeFile(
+      path.join(tempDir, 'package.json'),
+      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'tauri.conf.json'),
+      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.toml'),
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.lock'),
+      `version = 4
+
+[[package]]   # package header
+name = "${DESKTOP_TAURI_CRATE_NAME}"   # desktop package
+version = "0.1.0"   # keep this comment
+
+[[package]]
+name = "dep"
+version = "9.9.9"
+`,
+      'utf8',
+    );
+
+    await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
+
+    const cargoLock = await readFile(path.join(srcTauriDir, 'Cargo.lock'), 'utf8');
+
+    assert.match(
+      cargoLock,
+      new RegExp(
+        String.raw`\[\[package\]\]\s+# package header\nname = "${DESKTOP_TAURI_CRATE_NAME}"\s+# desktop package\nversion = "2.3.4"\s+# keep this comment`,
+      ),
     );
   } finally {
     await rm(tempDir, { recursive: true, force: true });

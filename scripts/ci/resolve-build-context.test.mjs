@@ -232,3 +232,23 @@ test('workflow_dispatch custom requires an explicit source ref', async () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /workflow_dispatch custom mode requires source_git_ref/i);
 });
+
+test('fake git rev-parse returns the configured SHA for arbitrary refs', async () => {
+  await withSandbox(
+    {
+      ...baseEnv,
+      ASTRBOT_TEST_FETCHED_SHA: '5555555555555555555555555555555555555555',
+    },
+    async (sandbox) => {
+      const gitPath = path.join(sandbox.tempDir, 'bin', 'git');
+      const repoDir = path.join(sandbox.tempDir, 'repo');
+      const result = spawnSync(gitPath, ['-C', repoDir, 'rev-parse', 'FETCH_HEAD'], {
+        encoding: 'utf8',
+        env: sandbox.env,
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), '5555555555555555555555555555555555555555');
+    },
+  );
+});
