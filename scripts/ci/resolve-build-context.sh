@@ -149,6 +149,10 @@ resolve_latest_upstream_tag() {
   printf '%s\n' "${latest_tag}"
 }
 
+custom_build_mode_supported_for_event() {
+  [ "$1" = "workflow_dispatch" ]
+}
+
 source_git_url="${ASTRBOT_SOURCE_GIT_URL}"
 source_git_ref="${ASTRBOT_SOURCE_GIT_REF}"
 nightly_source_git_ref="${ASTRBOT_NIGHTLY_SOURCE_GIT_REF:-master}"
@@ -221,6 +225,11 @@ if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
   fi
 fi
 
+if [ "${requested_build_mode}" = "custom" ] && ! custom_build_mode_supported_for_event "${GITHUB_EVENT_NAME}"; then
+  echo "::error::${GITHUB_EVENT_NAME} runs do not support build_mode=custom." >&2
+  exit 1
+fi
+
 # Normalize build mode in one place to keep behavior explicit and predictable.
 case "${GITHUB_EVENT_NAME}" in
   workflow_dispatch)
@@ -246,10 +255,6 @@ case "${GITHUB_EVENT_NAME}" in
     ;;
   schedule)
     publish_release="true"
-    if [ "${requested_build_mode}" = "custom" ]; then
-      echo "::error::schedule runs do not support build_mode=custom." >&2
-      exit 1
-    fi
     if [ "${requested_build_mode}" = "auto" ]; then
       if [ -n "${event_schedule_raw}" ] && [ -n "${nightly_schedule_cron}" ]; then
         if cron_expressions_match "${event_schedule_raw}" "${nightly_schedule_cron}"; then
@@ -285,10 +290,6 @@ case "${GITHUB_EVENT_NAME}" in
     fi
     ;;
   *)
-    if [ "${requested_build_mode}" = "custom" ]; then
-      echo "::error::${GITHUB_EVENT_NAME} runs do not support build_mode=custom." >&2
-      exit 1
-    fi
     if [ "${requested_build_mode}" = "auto" ]; then
       build_mode="tag-poll"
       echo "::notice::${GITHUB_EVENT_NAME} build_mode=auto normalized to tag-poll."

@@ -51,36 +51,9 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const CARGO_LOCK_PACKAGE_HEADER = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
+const CARGO_LOCK_ANY_HEADER = /^\s*\[\[/;
 const CARGO_LOCK_VERSION_LINE = /^\s*version\s*=/;
-
-class CargoLockPackageNotFoundError extends Error {
-  constructor(packageName) {
-    super(`Cannot update Cargo.lock: package "${packageName}" not found`);
-    this.name = 'CargoLockPackageNotFoundError';
-  }
-}
-
-const findCargoLockPackageBlocks = (lines) => {
-  const blocks = [];
-  let start = null;
-
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!CARGO_LOCK_PACKAGE_HEADER.test(lines[index])) {
-      continue;
-    }
-
-    if (start !== null) {
-      blocks.push({ start, end: index });
-    }
-    start = index;
-  }
-
-  if (start !== null) {
-    blocks.push({ start, end: lines.length });
-  }
-
-  return blocks;
-};
+const escapeTomlBasicString = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
 const updateVersionLine = (line, version) => {
   const commentIndex = line.indexOf('#');
@@ -98,9 +71,8 @@ const updateVersionLine = (line, version) => {
     return null;
   }
 
-  const quote = right.includes("'") ? "'" : '"';
   const trailingWhitespace = beforeComment.match(/\s*$/u)?.[0] ?? '';
-  const updatedLine = `${left} = ${quote}${version}${quote}`;
+  const updatedLine = `${left} = "${escapeTomlBasicString(version)}"`;
 
   if (!comment) {
     return `${updatedLine}${trailingWhitespace}`;
@@ -111,47 +83,71 @@ const updateVersionLine = (line, version) => {
 
 const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
   const lines = cargoLock.split(/\r?\n/);
-  const packageBlocks = findCargoLockPackageBlocks(lines);
+  const newline = cargoLock.includes('\r\n') ? '\r\n' : '\n';
   const packageNameLinePattern = new RegExp(
     `^\\s*name\\s*=\\s*"${escapeRegExp(packageName)}"\\s*(?:#.*)?$`,
   );
 
-  for (const { start, end } of packageBlocks) {
-    let packageNameLineIndex = -1;
+  let inPackageBlock = false;
+  let inTargetPackage = false;
+  let foundTargetPackage = false;
 
-    for (let index = start + 1; index < end; index += 1) {
-      if (!packageNameLinePattern.test(lines[index])) {
-        continue;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (CARGO_LOCK_PACKAGE_HEADER.test(line)) {
+      if (inTargetPackage) {
+        throw new Error(
+          `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
+        );
       }
-
-      packageNameLineIndex = index;
-      break;
-    }
-
-    if (packageNameLineIndex === -1) {
+      inPackageBlock = true;
+      inTargetPackage = false;
       continue;
     }
 
-    for (let index = packageNameLineIndex + 1; index < end; index += 1) {
-      if (!CARGO_LOCK_VERSION_LINE.test(lines[index])) {
-        continue;
+    if (inPackageBlock && CARGO_LOCK_ANY_HEADER.test(line)) {
+      if (inTargetPackage) {
+        throw new Error(
+          `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
+        );
       }
-
-      const updatedLine = updateVersionLine(lines[index], version);
-      if (updatedLine === null) {
-        break;
-      }
-
-      lines[index] = updatedLine;
-      return lines.join(cargoLock.includes('\r\n') ? '\r\n' : '\n');
+      inPackageBlock = false;
+      inTargetPackage = false;
     }
 
+    if (!inPackageBlock) {
+      continue;
+    }
+
+    if (!inTargetPackage && packageNameLinePattern.test(line)) {
+      inTargetPackage = true;
+      foundTargetPackage = true;
+      continue;
+    }
+
+    if (!inTargetPackage || !CARGO_LOCK_VERSION_LINE.test(line)) {
+      continue;
+    }
+
+    const updatedLine = updateVersionLine(line, version);
+    if (updatedLine === null) {
+      throw new Error(
+        `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
+      );
+    }
+
+    lines[index] = updatedLine;
+    return { content: lines.join(newline), updated: true, foundTargetPackage: true };
+  }
+
+  if (inTargetPackage) {
     throw new Error(
       `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
     );
   }
 
-  throw new CargoLockPackageNotFoundError(packageName);
+  return { content: cargoLock, updated: false, foundTargetPackage };
 };
 
 export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
@@ -184,21 +180,17 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
 
   if (existsSync(cargoLockPath)) {
     const cargoLock = await readFile(cargoLockPath, 'utf8');
-    let updatedCargoLock = cargoLock;
-    try {
-      updatedCargoLock = updateCargoLockPackageVersion({
-        cargoLock,
-        packageName: DESKTOP_TAURI_CRATE_NAME,
-        version,
-      });
-    } catch (error) {
-      if (error instanceof CargoLockPackageNotFoundError) {
-        console.warn(`${cargoLockPath}: ${error.message}. Skipping Cargo.lock version sync.`);
-      } else {
-        throw error;
-      }
-    }
-    if (updatedCargoLock !== cargoLock) {
+    const { content: updatedCargoLock, updated, foundTargetPackage } = updateCargoLockPackageVersion({
+      cargoLock,
+      packageName: DESKTOP_TAURI_CRATE_NAME,
+      version,
+    });
+
+    if (!foundTargetPackage) {
+      console.warn(
+        `${cargoLockPath}: package "${DESKTOP_TAURI_CRATE_NAME}" not found. Skipping Cargo.lock version sync.`,
+      );
+    } else if (updated && updatedCargoLock !== cargoLock) {
       await writeFile(cargoLockPath, updatedCargoLock, 'utf8');
     }
   }

@@ -233,6 +233,28 @@ test('workflow_dispatch custom requires an explicit source ref', async () => {
   assert.match(result.stderr, /workflow_dispatch custom mode requires source_git_ref/i);
 });
 
+test('schedule runs reject build_mode=custom', async () => {
+  const { result } = await runResolveBuildContext({
+    ...baseEnv,
+    GITHUB_EVENT_NAME: 'schedule',
+    WORKFLOW_BUILD_MODE: 'custom',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /schedule runs do not support build_mode=custom/i);
+});
+
+test('non-workflow_dispatch runs reject build_mode=custom', async () => {
+  const { result } = await runResolveBuildContext({
+    ...baseEnv,
+    GITHUB_EVENT_NAME: 'push',
+    WORKFLOW_BUILD_MODE: 'custom',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /push runs do not support build_mode=custom/i);
+});
+
 test('fake git rev-parse returns the configured SHA for arbitrary refs', async () => {
   await withSandbox(
     {

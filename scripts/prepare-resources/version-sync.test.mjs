@@ -207,6 +207,49 @@ version = "9.9.9"
   }
 });
 
+test('syncDesktopVersionFiles rewrites Cargo.lock version lines using double quotes', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  try {
+    const srcTauriDir = path.join(tempDir, 'src-tauri');
+    await mkdir(srcTauriDir, { recursive: true });
+
+    await writeFile(
+      path.join(tempDir, 'package.json'),
+      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'tauri.conf.json'),
+      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.toml'),
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.lock'),
+      `version = 4
+
+[[package]]
+name = "${DESKTOP_TAURI_CRATE_NAME}"
+version = '0.1.0'   # keep this comment
+`,
+      'utf8',
+    );
+
+    await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
+
+    const cargoLock = await readFile(path.join(srcTauriDir, 'Cargo.lock'), 'utf8');
+
+    assert.match(cargoLock, /version = "2.3.4"\s+# keep this comment/);
+    assert.doesNotMatch(cargoLock, /version = '2\.3\.4'/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('syncDesktopVersionFiles only updates the version key, not similarly prefixed keys', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
   try {
