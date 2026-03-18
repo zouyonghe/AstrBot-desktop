@@ -206,3 +206,102 @@ version = "9.9.9"
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('syncDesktopVersionFiles skips Cargo.lock updates when the desktop crate is missing', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    const srcTauriDir = path.join(tempDir, 'src-tauri');
+    await mkdir(srcTauriDir, { recursive: true });
+
+    await writeFile(
+      path.join(tempDir, 'package.json'),
+      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'tauri.conf.json'),
+      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.toml'),
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
+      'utf8',
+    );
+
+    const originalCargoLock = `version = 4
+
+[[package]]
+name = "dep"
+version = "9.9.9"
+`;
+    await writeFile(path.join(srcTauriDir, 'Cargo.lock'), originalCargoLock, 'utf8');
+
+    await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
+
+    const packageJson = JSON.parse(await readFile(path.join(tempDir, 'package.json'), 'utf8'));
+    const tauriConfig = JSON.parse(await readFile(path.join(srcTauriDir, 'tauri.conf.json'), 'utf8'));
+    const cargoToml = await readFile(path.join(srcTauriDir, 'Cargo.toml'), 'utf8');
+    const cargoLock = await readFile(path.join(srcTauriDir, 'Cargo.lock'), 'utf8');
+
+    assert.equal(packageJson.version, '2.3.4');
+    assert.equal(tauriConfig.version, '2.3.4');
+    assert.match(cargoToml, /version\s*=\s*"2.3.4"/);
+    assert.equal(cargoLock, originalCargoLock);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], new RegExp(`package "${DESKTOP_TAURI_CRATE_NAME}" not found`));
+  } finally {
+    console.warn = originalWarn;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('syncDesktopVersionFiles throws a specific error when the desktop crate version entry is malformed', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  try {
+    const srcTauriDir = path.join(tempDir, 'src-tauri');
+    await mkdir(srcTauriDir, { recursive: true });
+
+    await writeFile(
+      path.join(tempDir, 'package.json'),
+      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'tauri.conf.json'),
+      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.toml'),
+      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.lock'),
+      `version = 4
+
+[[package]]
+name = "${DESKTOP_TAURI_CRATE_NAME}"
+source = "path+file:///workspace/src-tauri"
+checksum = "unexpected-layout"
+`,
+      'utf8',
+    );
+
+    await assert.rejects(
+      syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' }),
+      new RegExp(
+        `version entry for package "${DESKTOP_TAURI_CRATE_NAME}" not found or has an unexpected layout`,
+      ),
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

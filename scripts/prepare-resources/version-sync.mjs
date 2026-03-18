@@ -50,6 +50,14 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
 };
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const CARGO_LOCK_PACKAGE_NOT_FOUND = 'cargo-lock-package-not-found';
+const CARGO_LOCK_VERSION_NOT_FOUND = 'cargo-lock-version-not-found';
+
+const createCargoLockUpdateError = (message, code) => {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+};
 
 const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
   const packageHeaderPattern = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
@@ -59,57 +67,53 @@ const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
   const packageVersionPattern = /^(\s*version\s*=\s*")[^"]+(")(\s*(?:#.*)?)$/;
   const lines = cargoLock.split(/\r?\n/);
 
+  let inPackageBlock = false;
+  let inTargetPackage = false;
   let foundTargetPackage = false;
   let foundTargetVersion = false;
 
-  const updateBlock = (startIndex, endIndex) => {
-    let packageNameLineIndex = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
 
-    for (let index = startIndex + 1; index < endIndex; index += 1) {
-      if (packageNamePattern.test(lines[index])) {
-        packageNameLineIndex = index;
-        break;
-      }
-    }
-
-    if (packageNameLineIndex === -1) {
-      return false;
-    }
-
-    foundTargetPackage = true;
-
-    for (let index = packageNameLineIndex + 1; index < endIndex; index += 1) {
-      if (packageHeaderPattern.test(lines[index])) {
-        break;
-      }
-      if (!packageVersionPattern.test(lines[index])) {
-        continue;
-      }
-
-      foundTargetVersion = true;
-      lines[index] = lines[index].replace(packageVersionPattern, `$1${version}$2$3`);
-      return true;
-    }
-
-    return false;
-  };
-
-  let blockStartIndex = -1;
-  for (let index = 0; index <= lines.length; index += 1) {
-    const isBoundary = index === lines.length || packageHeaderPattern.test(lines[index]);
-    if (!isBoundary) {
+    if (packageHeaderPattern.test(line)) {
+      inPackageBlock = true;
+      inTargetPackage = false;
       continue;
     }
 
-    if (blockStartIndex !== -1 && updateBlock(blockStartIndex, index)) {
-      break;
+    if (!inPackageBlock) {
+      continue;
     }
 
-    blockStartIndex = index;
+    if (!inTargetPackage) {
+      if (packageNamePattern.test(line)) {
+        inTargetPackage = true;
+        foundTargetPackage = true;
+      }
+      continue;
+    }
+
+    if (!packageVersionPattern.test(line)) {
+      continue;
+    }
+
+    foundTargetVersion = true;
+    lines[index] = line.replace(packageVersionPattern, `$1${version}$2$3`);
+    break;
   }
 
-  if (!foundTargetPackage || !foundTargetVersion) {
-    throw new Error(`Cannot update Cargo.lock package version for ${packageName}`);
+  if (!foundTargetPackage) {
+    throw createCargoLockUpdateError(
+      `Cannot update Cargo.lock: package "${packageName}" not found`,
+      CARGO_LOCK_PACKAGE_NOT_FOUND,
+    );
+  }
+
+  if (!foundTargetVersion) {
+    throw createCargoLockUpdateError(
+      `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
+      CARGO_LOCK_VERSION_NOT_FOUND,
+    );
   }
 
   return lines.join(cargoLock.includes('\r\n') ? '\r\n' : '\n');
@@ -145,11 +149,20 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
 
   if (existsSync(cargoLockPath)) {
     const cargoLock = await readFile(cargoLockPath, 'utf8');
-    const updatedCargoLock = updateCargoLockPackageVersion({
-      cargoLock,
-      packageName: DESKTOP_TAURI_CRATE_NAME,
-      version,
-    });
+    let updatedCargoLock = cargoLock;
+    try {
+      updatedCargoLock = updateCargoLockPackageVersion({
+        cargoLock,
+        packageName: DESKTOP_TAURI_CRATE_NAME,
+        version,
+      });
+    } catch (error) {
+      if (error?.code === CARGO_LOCK_PACKAGE_NOT_FOUND) {
+        console.warn(`${cargoLockPath}: ${error.message}. Skipping Cargo.lock version sync.`);
+      } else {
+        throw error;
+      }
+    }
     if (updatedCargoLock !== cargoLock) {
       await writeFile(cargoLockPath, updatedCargoLock, 'utf8');
     }
