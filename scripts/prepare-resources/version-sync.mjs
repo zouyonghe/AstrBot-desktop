@@ -51,6 +51,7 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const CARGO_LOCK_PACKAGE_HEADER = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
+const CARGO_LOCK_VERSION_LINE = /^\s*version\s*=/;
 
 class CargoLockPackageNotFoundError extends Error {
   constructor(packageName) {
@@ -132,7 +133,7 @@ const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
     }
 
     for (let index = packageNameLineIndex + 1; index < end; index += 1) {
-      if (!lines[index].trimStart().startsWith('version')) {
+      if (!CARGO_LOCK_VERSION_LINE.test(lines[index])) {
         continue;
       }
 
