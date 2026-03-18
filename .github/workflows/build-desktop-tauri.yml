@@ -8,7 +8,7 @@ on:
         required: false
         default: https://github.com/AstrBotDevs/AstrBot.git
       source_git_ref:
-        description: Optional source ref override for `tag-poll` (branch/tag/commit SHA). Ignored in `nightly`.
+        description: Optional source ref override for `tag-poll` or required explicit source ref for `custom` (branch/tag/commit SHA).
         required: false
         default: ""
       publish_release:
@@ -18,14 +18,15 @@ on:
         default: true
       build_mode:
         description: >-
-          Build mode (`tag-poll` | `nightly`): `nightly` (default) always builds latest upstream commit,
-          `tag-poll` builds latest upstream tag (or `source_git_ref` override)
+          Build mode (`tag-poll` | `nightly` | `custom`): `nightly` (default) always builds latest upstream commit,
+          `tag-poll` builds latest upstream tag (or `source_git_ref` override), `custom` builds the explicit `source_git_ref`
         required: false
         type: choice
         default: nightly
         options:
           - tag-poll
           - nightly
+          - custom
   schedule:
     # Hourly tag-poll (exclude the dedicated nightly window at 03:xx UTC).
     - cron: '0 0-2,4-23 * * *'
@@ -130,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          changed_files="$(git status --porcelain -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json)"
+          changed_files="$(git status --porcelain -- package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json)"
           if [ -z "${changed_files}" ]; then
             echo "Version files are already up to date. Nothing to commit."
             exit 0
@@ -138,7 +139,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
           git commit -m "chore(version): sync desktop version to v${ASTRBOT_VERSION}"
 
           git fetch origin "${TARGET_REF_NAME}"
@@ -551,6 +552,7 @@ jobs:
           python3 scripts/ci/validate-release-artifacts.py release-artifacts
 
       - name: Generate Tauri updater manifest
+        if: ${{ needs.resolve_build_context.outputs.build_mode != 'custom' }}
         env:
           RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
           RELEASE_VERSION: ${{ needs.resolve_build_context.outputs.astrbot_version }}
@@ -600,7 +602,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Demote previous prerelease marker
-        if: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
+        if: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' && needs.resolve_build_context.outputs.build_mode == 'nightly' }}
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_RELEASE_TAG: ${{ needs.resolve_build_context.outputs.release_tag }}
