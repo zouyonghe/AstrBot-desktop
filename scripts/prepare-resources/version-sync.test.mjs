@@ -11,6 +11,34 @@ import {
   syncDesktopVersionFiles,
 } from './version-sync.mjs';
 
+const createTempDesktopProject = async ({ cargoLockContents, version = '0.1.0' }) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  const srcTauriDir = path.join(tempDir, 'src-tauri');
+
+  await mkdir(srcTauriDir, { recursive: true });
+  await writeFile(
+    path.join(tempDir, 'package.json'),
+    `${JSON.stringify({ name: 'test', version }, null, 2)}\n`,
+    'utf8',
+  );
+  await writeFile(
+    path.join(srcTauriDir, 'tauri.conf.json'),
+    `${JSON.stringify({ version }, null, 2)}\n`,
+    'utf8',
+  );
+  await writeFile(
+    path.join(srcTauriDir, 'Cargo.toml'),
+    `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "${version}"\n`,
+    'utf8',
+  );
+
+  if (typeof cargoLockContents === 'string') {
+    await writeFile(path.join(srcTauriDir, 'Cargo.lock'), cargoLockContents, 'utf8');
+  }
+
+  return { tempDir, srcTauriDir };
+};
+
 test('normalizeDesktopVersionOverride trims and strips leading v', () => {
   assert.equal(normalizeDesktopVersionOverride(' v1.2.3 '), '1.2.3');
   assert.equal(normalizeDesktopVersionOverride('2.0.0'), '2.0.0');
@@ -41,29 +69,11 @@ version = "1.9.1"
 });
 
 test('syncDesktopVersionFiles updates package.json, tauri.conf.json, Cargo.toml and Cargo.lock', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]
 name = "${DESKTOP_TAURI_CRATE_NAME}"
@@ -73,8 +83,7 @@ version = "0.1.0"
 name = "dep"
 version = "9.9.9"
 `,
-      'utf8',
-    );
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -97,29 +106,11 @@ version = "9.9.9"
 });
 
 test('syncDesktopVersionFiles tolerates extra Cargo.lock fields between package name and version', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]
 name = "${DESKTOP_TAURI_CRATE_NAME}"
@@ -134,8 +125,7 @@ name = "dep"
 version = "9.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 `,
-      'utf8',
-    );
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -157,29 +147,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 });
 
 test('syncDesktopVersionFiles preserves trailing Cargo.lock comments and spaces on name/version lines', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]   # package header
 name = "${DESKTOP_TAURI_CRATE_NAME}"   # desktop package
@@ -189,8 +161,7 @@ version = "0.1.0"   # keep this comment
 name = "dep"
 version = "9.9.9"
 `,
-      'utf8',
-    );
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -208,36 +179,17 @@ version = "9.9.9"
 });
 
 test('syncDesktopVersionFiles rewrites Cargo.lock version lines using double quotes', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]
 name = "${DESKTOP_TAURI_CRATE_NAME}"
 version = '0.1.0'   # keep this comment
 `,
-      'utf8',
-    );
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -251,37 +203,18 @@ version = '0.1.0'   # keep this comment
 });
 
 test('syncDesktopVersionFiles only updates the version key, not similarly prefixed keys', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]
 name = "${DESKTOP_TAURI_CRATE_NAME}"
 versioned_dep = "keep-me"
 version = "0.1.0"
 `,
-      'utf8',
-    );
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -295,7 +228,8 @@ version = "0.1.0"
 });
 
 test('syncDesktopVersionFiles skips Cargo.lock updates when the desktop crate is missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   const warnings = [];
   const originalWarn = console.warn;
   console.warn = (message) => {
@@ -303,32 +237,15 @@ test('syncDesktopVersionFiles skips Cargo.lock updates when the desktop crate is
   };
 
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-
     const originalCargoLock = `version = 4
 
 [[package]]
 name = "dep"
 version = "9.9.9"
 `;
-    await writeFile(path.join(srcTauriDir, 'Cargo.lock'), originalCargoLock, 'utf8');
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: originalCargoLock,
+    }));
 
     await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
 
@@ -350,37 +267,18 @@ version = "9.9.9"
 });
 
 test('syncDesktopVersionFiles throws a specific error when the desktop crate version entry is malformed', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  let tempDir;
+  let srcTauriDir;
   try {
-    const srcTauriDir = path.join(tempDir, 'src-tauri');
-    await mkdir(srcTauriDir, { recursive: true });
-
-    await writeFile(
-      path.join(tempDir, 'package.json'),
-      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'tauri.conf.json'),
-      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.toml'),
-      `[package]\nname = "${DESKTOP_TAURI_CRATE_NAME}"\nversion = "0.1.0"\n`,
-      'utf8',
-    );
-    await writeFile(
-      path.join(srcTauriDir, 'Cargo.lock'),
-      `version = 4
+    ({ tempDir, srcTauriDir } = await createTempDesktopProject({
+      cargoLockContents: `version = 4
 
 [[package]]
 name = "${DESKTOP_TAURI_CRATE_NAME}"
 source = "path+file:///workspace/src-tauri"
 checksum = "unexpected-layout"
 `,
-      'utf8',
-    );
+    }));
 
     await assert.rejects(
       syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' }),
