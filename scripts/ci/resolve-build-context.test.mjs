@@ -219,7 +219,7 @@ test('workflow_dispatch custom resolves explicit source ref to a pinned commit S
     outputs.astrbot_version,
     /^4\.19\.0-custom\.\d{8}\.44444444$/,
   );
-  assert.equal(outputs.release_prerelease, 'true');
+  assert.equal(outputs.release_prerelease, 'false');
   assert.equal(outputs.release_make_latest, 'false');
   assert.match(outputs.release_tag, /^custom-\d{8}-44444444$/);
 });

@@ -427,7 +427,7 @@ elif [ "${build_mode}" = "custom" ] && [ "${should_build}" = "true" ]; then
   if [ "${publish_release}" = "true" ]; then
     release_tag="custom-${custom_date}-${short_sha}"
     release_name="AstrBot Desktop v${base_version}-custom-${short_sha}"
-    release_prerelease="true"
+    release_prerelease="false"
   fi
 elif [ "${publish_release}" = "true" ] && [ "${should_build}" = "true" ]; then
   release_tag="v${version}"
