@@ -50,73 +50,107 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
 };
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const CARGO_LOCK_PACKAGE_NOT_FOUND = 'cargo-lock-package-not-found';
-const CARGO_LOCK_VERSION_NOT_FOUND = 'cargo-lock-version-not-found';
+const CARGO_LOCK_PACKAGE_HEADER = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
 
-const createCargoLockUpdateError = (message, code) => {
-  const error = new Error(message);
-  error.code = code;
-  return error;
+class CargoLockPackageNotFoundError extends Error {
+  constructor(packageName) {
+    super(`Cannot update Cargo.lock: package "${packageName}" not found`);
+    this.name = 'CargoLockPackageNotFoundError';
+  }
+}
+
+const findCargoLockPackageBlocks = (lines) => {
+  const blocks = [];
+  let start = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!CARGO_LOCK_PACKAGE_HEADER.test(lines[index])) {
+      continue;
+    }
+
+    if (start !== null) {
+      blocks.push({ start, end: index });
+    }
+    start = index;
+  }
+
+  if (start !== null) {
+    blocks.push({ start, end: lines.length });
+  }
+
+  return blocks;
+};
+
+const updateVersionLine = (line, version) => {
+  const commentIndex = line.indexOf('#');
+  const beforeComment = commentIndex === -1 ? line : line.slice(0, commentIndex);
+  const comment = commentIndex === -1 ? '' : line.slice(commentIndex);
+  const separatorIndex = beforeComment.indexOf('=');
+
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  const left = beforeComment.slice(0, separatorIndex).trimEnd();
+  const right = beforeComment.slice(separatorIndex + 1);
+  if (!right.trim()) {
+    return null;
+  }
+
+  const quote = right.includes("'") ? "'" : '"';
+  const trailingWhitespace = beforeComment.match(/\s*$/u)?.[0] ?? '';
+  const updatedLine = `${left} = ${quote}${version}${quote}`;
+
+  if (!comment) {
+    return `${updatedLine}${trailingWhitespace}`;
+  }
+
+  return `${updatedLine}${trailingWhitespace}${comment}`;
 };
 
 const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
-  const packageHeaderPattern = /^\s*\[\[package\]\]\s*(?:#.*)?$/;
-  const packageNamePattern = new RegExp(
+  const lines = cargoLock.split(/\r?\n/);
+  const packageBlocks = findCargoLockPackageBlocks(lines);
+  const packageNameLinePattern = new RegExp(
     `^\\s*name\\s*=\\s*"${escapeRegExp(packageName)}"\\s*(?:#.*)?$`,
   );
-  const packageVersionPattern = /^(\s*version\s*=\s*")[^"]+(")(\s*(?:#.*)?)$/;
-  const lines = cargoLock.split(/\r?\n/);
 
-  let inPackageBlock = false;
-  let inTargetPackage = false;
-  let foundTargetPackage = false;
-  let foundTargetVersion = false;
+  for (const { start, end } of packageBlocks) {
+    let packageNameLineIndex = -1;
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-
-    if (packageHeaderPattern.test(line)) {
-      inPackageBlock = true;
-      inTargetPackage = false;
-      continue;
-    }
-
-    if (!inPackageBlock) {
-      continue;
-    }
-
-    if (!inTargetPackage) {
-      if (packageNamePattern.test(line)) {
-        inTargetPackage = true;
-        foundTargetPackage = true;
+    for (let index = start + 1; index < end; index += 1) {
+      if (!packageNameLinePattern.test(lines[index])) {
+        continue;
       }
+
+      packageNameLineIndex = index;
+      break;
+    }
+
+    if (packageNameLineIndex === -1) {
       continue;
     }
 
-    if (!packageVersionPattern.test(line)) {
-      continue;
+    for (let index = packageNameLineIndex + 1; index < end; index += 1) {
+      if (!lines[index].trimStart().startsWith('version')) {
+        continue;
+      }
+
+      const updatedLine = updateVersionLine(lines[index], version);
+      if (updatedLine === null) {
+        break;
+      }
+
+      lines[index] = updatedLine;
+      return lines.join(cargoLock.includes('\r\n') ? '\r\n' : '\n');
     }
 
-    foundTargetVersion = true;
-    lines[index] = line.replace(packageVersionPattern, `$1${version}$2$3`);
-    break;
-  }
-
-  if (!foundTargetPackage) {
-    throw createCargoLockUpdateError(
-      `Cannot update Cargo.lock: package "${packageName}" not found`,
-      CARGO_LOCK_PACKAGE_NOT_FOUND,
-    );
-  }
-
-  if (!foundTargetVersion) {
-    throw createCargoLockUpdateError(
+    throw new Error(
       `Cannot update Cargo.lock: version entry for package "${packageName}" not found or has an unexpected layout`,
-      CARGO_LOCK_VERSION_NOT_FOUND,
     );
   }
 
-  return lines.join(cargoLock.includes('\r\n') ? '\r\n' : '\n');
+  throw new CargoLockPackageNotFoundError(packageName);
 };
 
 export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
@@ -157,7 +191,7 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
         version,
       });
     } catch (error) {
-      if (error?.code === CARGO_LOCK_PACKAGE_NOT_FOUND) {
+      if (error instanceof CargoLockPackageNotFoundError) {
         console.warn(`${cargoLockPath}: ${error.message}. Skipping Cargo.lock version sync.`);
       } else {
         throw error;
