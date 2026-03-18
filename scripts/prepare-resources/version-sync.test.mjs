@@ -94,3 +94,61 @@ version = "9.9.9"
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('syncDesktopVersionFiles tolerates extra Cargo.lock fields between package name and version', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'astrbot-sync-'));
+  try {
+    const srcTauriDir = path.join(tempDir, 'src-tauri');
+    await mkdir(srcTauriDir, { recursive: true });
+
+    await writeFile(
+      path.join(tempDir, 'package.json'),
+      `${JSON.stringify({ name: 'test', version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'tauri.conf.json'),
+      `${JSON.stringify({ version: '0.1.0' }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.toml'),
+      `[package]\nname = "astrbot-desktop-tauri"\nversion = "0.1.0"\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(srcTauriDir, 'Cargo.lock'),
+      `version = 4
+
+[[package]]
+name = "astrbot-desktop-tauri"
+source = "path+file:///workspace/src-tauri"
+version = "0.1.0"
+dependencies = [
+ "dep",
+]
+
+[[package]]
+name = "dep"
+version = "9.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+`,
+      'utf8',
+    );
+
+    await syncDesktopVersionFiles({ projectRoot: tempDir, version: '2.3.4' });
+
+    const cargoLock = await readFile(path.join(srcTauriDir, 'Cargo.lock'), 'utf8');
+
+    assert.match(
+      cargoLock,
+      /\[\[package\]\]\nname = "astrbot-desktop-tauri"\nsource = "path\+file:\/\/\/workspace\/src-tauri"\nversion = "2.3.4"/,
+    );
+    assert.match(
+      cargoLock,
+      /\[\[package\]\]\nname = "dep"\nversion = "9.9.9"\nsource = "registry\+https:\/\/github.com\/rust-lang\/crates.io-index"/,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

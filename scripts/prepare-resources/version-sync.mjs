@@ -47,6 +47,34 @@ export const readAstrbotVersionFromPyproject = async ({ sourceDir }) => {
   throw new Error(`Cannot resolve [project].version from ${pyprojectPath}`);
 };
 
+const updateCargoLockPackageVersion = ({ cargoLock, packageName, version }) => {
+  const blockPattern = /(^|\n)(\[\[package\]\][\s\S]*?)(?=\n\[\[package\]\]|\s*$)/g;
+
+  let foundTargetPackage = false;
+  let foundTargetVersion = false;
+
+  const updatedCargoLock = cargoLock.replace(blockPattern, (match, prefix, block) => {
+    if (!new RegExp(`^name = "${packageName}"$`, 'm').test(block)) {
+      return match;
+    }
+
+    foundTargetPackage = true;
+    const versionPattern = /^version = "[^"]+"$/m;
+    if (!versionPattern.test(block)) {
+      return match;
+    }
+    foundTargetVersion = true;
+    const updatedBlock = block.replace(versionPattern, `version = "${version}"`);
+    return `${prefix}${updatedBlock}`;
+  });
+
+  if (!foundTargetPackage || !foundTargetVersion) {
+    throw new Error(`Cannot update Cargo.lock package version for ${packageName}`);
+  }
+
+  return updatedCargoLock;
+};
+
 export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
   const packageJsonPath = path.join(projectRoot, 'package.json');
   const tauriConfigPath = path.join(projectRoot, 'src-tauri', 'tauri.conf.json');
@@ -77,12 +105,11 @@ export const syncDesktopVersionFiles = async ({ projectRoot, version }) => {
 
   if (existsSync(cargoLockPath)) {
     const cargoLock = await readFile(cargoLockPath, 'utf8');
-    const cargoLockVersionPattern =
-      /(\[\[package\]\]\s+name = "astrbot-desktop-tauri"\s+version = ")[^"]+(")/m;
-    if (!cargoLockVersionPattern.test(cargoLock)) {
-      throw new Error(`Cannot update Cargo.lock package version in ${cargoLockPath}`);
-    }
-    const updatedCargoLock = cargoLock.replace(cargoLockVersionPattern, `$1${version}$2`);
+    const updatedCargoLock = updateCargoLockPackageVersion({
+      cargoLock,
+      packageName: 'astrbot-desktop-tauri',
+      version,
+    });
     if (updatedCargoLock !== cargoLock) {
       await writeFile(cargoLockPath, updatedCargoLock, 'utf8');
     }
