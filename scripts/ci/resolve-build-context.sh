@@ -179,10 +179,10 @@ workflow_source_git_ref_provided="false"
 latest_upstream_tag=""
 
 case "${requested_build_mode}" in
-  auto|tag-poll|nightly) ;;
+  auto|tag-poll|nightly|custom) ;;
   *)
     if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-      echo "::error::invalid build_mode input '${requested_build_mode}'; expected tag-poll/nightly (auto is deprecated but still accepted and normalized to tag-poll for backward compatibility)."
+      echo "::error::invalid build_mode input '${requested_build_mode}'; expected tag-poll/nightly/custom (auto is deprecated but still accepted and normalized to tag-poll for backward compatibility)."
     else
       echo "::error::invalid build_mode input '${requested_build_mode}'; expected auto/tag-poll/nightly."
     fi
@@ -234,12 +234,22 @@ case "${GITHUB_EVENT_NAME}" in
     else
       build_mode="${requested_build_mode}"
     fi
+    if [ "${build_mode}" = "custom" ] && [ "${workflow_source_git_ref_provided}" != "true" ]; then
+      echo "::error::workflow_dispatch custom mode requires source_git_ref." >&2
+      exit 1
+    fi
     if [ "${build_mode}" = "tag-poll" ]; then
       echo "::notice::workflow_dispatch tag-poll selected. Prefer schedule runs for routine tag polling."
+    elif [ "${build_mode}" = "custom" ]; then
+      echo "::notice::workflow_dispatch custom mode selected. Build will use the explicit source ref override."
     fi
     ;;
   schedule)
     publish_release="true"
+    if [ "${requested_build_mode}" = "custom" ]; then
+      echo "::error::schedule runs do not support build_mode=custom." >&2
+      exit 1
+    fi
     if [ "${requested_build_mode}" = "auto" ]; then
       if [ -n "${event_schedule_raw}" ] && [ -n "${nightly_schedule_cron}" ]; then
         if cron_expressions_match "${event_schedule_raw}" "${nightly_schedule_cron}"; then
@@ -275,6 +285,10 @@ case "${GITHUB_EVENT_NAME}" in
     fi
     ;;
   *)
+    if [ "${requested_build_mode}" = "custom" ]; then
+      echo "::error::${GITHUB_EVENT_NAME} runs do not support build_mode=custom." >&2
+      exit 1
+    fi
     if [ "${requested_build_mode}" = "auto" ]; then
       build_mode="tag-poll"
       echo "::notice::${GITHUB_EVENT_NAME} build_mode=auto normalized to tag-poll."
@@ -378,6 +392,15 @@ if [ "${should_build}" = "true" ]; then
     git -C "${repo_dir}" remote add origin "${source_git_url}"
     git -C "${repo_dir}" fetch --depth 1 origin "${source_git_ref}"
     git -C "${repo_dir}" checkout --detach FETCH_HEAD
+    if [ "${build_mode}" = "custom" ]; then
+      resolved_source_sha="$(git -C "${repo_dir}" rev-parse HEAD)"
+      if [ -z "${resolved_source_sha}" ]; then
+        echo "Unable to resolve a pinned commit SHA for custom source ref '${source_git_ref}'." >&2
+        exit 1
+      fi
+      echo "Custom source ref ${source_git_ref} resolved to ${resolved_source_sha}."
+      source_git_ref="${resolved_source_sha}"
+    fi
     version="$(python3 scripts/ci/read-project-version.py "${repo_dir}/pyproject.toml")"
   fi
 else
@@ -396,6 +419,16 @@ if [ "${build_mode}" = "nightly" ] && [ "${should_build}" = "true" ]; then
   release_tag="nightly"
   release_name="AstrBot Desktop v${base_version}-nightly-${short_sha}"
   release_prerelease="true"
+elif [ "${build_mode}" = "custom" ] && [ "${should_build}" = "true" ]; then
+  base_version="${version}"
+  custom_date="$(date -u +%Y%m%d)"
+  short_sha="$(printf '%s' "${source_git_ref}" | cut -c1-8)"
+  version="${version}-custom.${custom_date}.${short_sha}"
+  if [ "${publish_release}" = "true" ]; then
+    release_tag="custom-${custom_date}-${short_sha}"
+    release_name="AstrBot Desktop v${base_version}-custom-${short_sha}"
+    release_prerelease="true"
+  fi
 elif [ "${publish_release}" = "true" ] && [ "${should_build}" = "true" ]; then
   release_tag="v${version}"
   release_name="AstrBot Desktop v${version}"

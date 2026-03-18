@@ -48,6 +48,15 @@ const makeNightlyEnv = (overrides = {}) => ({
   ...overrides,
 });
 
+const makeCustomEnv = (overrides = {}) => ({
+  ...baseEnv,
+  WORKFLOW_BUILD_MODE: 'custom',
+  WORKFLOW_PUBLISH_RELEASE: 'true',
+  ASTRBOT_TEST_FETCHED_VERSION: '4.19.0',
+  ASTRBOT_TEST_FETCHED_SHA: '4444444444444444444444444444444444444444',
+  ...overrides,
+});
+
 const parseGithubOutput = async (outputPath) => {
   const raw = await readFile(outputPath, 'utf8');
   const entries = raw
@@ -196,4 +205,30 @@ test('workflow_dispatch nightly never marks latest', async () => {
   assert.equal(outputs.release_tag, 'nightly');
   assert.equal(outputs.release_prerelease, 'true');
   assert.equal(outputs.release_make_latest, 'false');
+});
+
+test('workflow_dispatch custom resolves explicit source ref to a pinned commit SHA', async () => {
+  const { result, outputs } = await runResolveBuildContext(makeCustomEnv({
+    WORKFLOW_SOURCE_GIT_REF: 'fix/windows-packaged-pip-build-env',
+  }));
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(outputs.build_mode, 'custom');
+  assert.equal(outputs.source_git_ref, '4444444444444444444444444444444444444444');
+  assert.match(
+    outputs.astrbot_version,
+    /^4\.19\.0-custom\.\d{8}\.44444444$/,
+  );
+  assert.equal(outputs.release_prerelease, 'true');
+  assert.equal(outputs.release_make_latest, 'false');
+  assert.match(outputs.release_tag, /^custom-\d{8}-44444444$/);
+});
+
+test('workflow_dispatch custom requires an explicit source ref', async () => {
+  const { result } = await runResolveBuildContext(makeCustomEnv({
+    WORKFLOW_SOURCE_GIT_REF: '',
+  }));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /workflow_dispatch custom mode requires source_git_ref/i);
 });

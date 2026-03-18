@@ -51,6 +51,13 @@ case "${command_name}" in
 version = "${ASTRBOT_TEST_FETCHED_VERSION:-4.19.0}"
 EOF
     ;;
+  rev-parse)
+    if [ "${1-}" != "HEAD" ]; then
+      printf 'unexpected git rev-parse arg: %s\n' "${1-}" >&2
+      exit 1
+    fi
+    printf '%s\n' "${ASTRBOT_TEST_FETCHED_SHA:-3333333333333333333333333333333333333333}"
+    ;;
   *)
     printf 'unexpected git command: %s %s\n' "${command_name}" "$*" >&2
     exit 1
