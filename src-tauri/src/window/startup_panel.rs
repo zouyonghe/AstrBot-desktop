@@ -184,6 +184,7 @@ fn read_recent_log_tail_after(path: &Path, start_offset: u64, max_bytes: usize) 
     read_recent_log_tail_from_reader_after(&mut file, start_offset, max_bytes).unwrap_or_default()
 }
 
+#[cfg(test)]
 fn read_recent_log_tail_from_reader<R>(reader: &mut R, max_bytes: usize) -> io::Result<String>
 where
     R: Read + Seek,
@@ -303,14 +304,14 @@ mod tests {
             .expect("non-failed stages should produce stage items");
 
         assert_eq!(items.len(), 4);
-        assert_eq!(items[0].done, true);
-        assert_eq!(items[0].active, false);
-        assert_eq!(items[1].done, true);
-        assert_eq!(items[1].active, false);
-        assert_eq!(items[2].done, false);
-        assert_eq!(items[2].active, true);
-        assert_eq!(items[3].done, false);
-        assert_eq!(items[3].active, false);
+        assert!(items[0].done);
+        assert!(!items[0].active);
+        assert!(items[1].done);
+        assert!(!items[1].active);
+        assert!(!items[2].done);
+        assert!(items[2].active);
+        assert!(!items[3].done);
+        assert!(!items[3].active);
     }
 
     #[test]
