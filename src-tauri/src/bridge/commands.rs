@@ -213,6 +213,14 @@ pub(crate) fn desktop_bridge_get_backend_state(app_handle: AppHandle) -> Backend
 }
 
 #[tauri::command]
+pub(crate) fn desktop_bridge_get_startup_panel_snapshot(
+    app_handle: AppHandle,
+) -> crate::app_types::StartupPanelSnapshot {
+    let state = app_handle.state::<BackendState>();
+    crate::window::startup_panel::snapshot(state.inner())
+}
+
+#[tauri::command]
 pub(crate) fn desktop_bridge_set_auth_token(
     app_handle: AppHandle,
     auth_token: Option<String>,

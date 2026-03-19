@@ -11,11 +11,27 @@ use crate::{
 };
 
 impl BackendState {
+    fn existing_backend_is_ready_for_startup(&self) -> bool {
+        let readiness = backend::runtime::backend_readiness_config(append_desktop_log);
+        matches!(
+            self.request_backend_status_code(
+                "GET",
+                &readiness.path,
+                readiness.probe_timeout_ms,
+                None,
+                None,
+            ),
+            Some(status_code) if (200..400).contains(&status_code)
+        )
+    }
+
     pub(crate) fn ensure_backend_ready(&self, app: &AppHandle) -> Result<(), String> {
-        if self.ping_backend(backend::runtime::backend_ping_timeout_ms(
-            append_desktop_log,
-        )) {
-            append_desktop_log("backend already reachable, skip spawn");
+        if self.existing_backend_is_ready_for_startup() {
+            crate::window::startup_panel::set_stage(
+                self,
+                crate::app_types::StartupPanelStage::HttpReady,
+            );
+            append_desktop_log("backend already HTTP ready, skip spawn");
             return Ok(());
         }
 
@@ -28,6 +44,10 @@ impl BackendState {
 
         let _spawn_guard = AtomicFlagGuard::try_set(&self.is_spawning)
             .ok_or_else(|| "Backend action already in progress.".to_string())?;
+        crate::window::startup_panel::set_stage(
+            self,
+            crate::app_types::StartupPanelStage::ResolveLaunchPlan,
+        );
         let plan = self.resolve_launch_plan(app)?;
         self.start_backend_process(app, &plan)?;
         self.wait_for_backend(&plan)
@@ -49,12 +69,20 @@ impl BackendState {
             let (http_status, tcp_reachable) =
                 self.probe_backend_readiness(&readiness.path, readiness.probe_timeout_ms);
             if matches!(http_status, Some(status_code) if (200..400).contains(&status_code)) {
+                crate::window::startup_panel::set_stage(
+                    self,
+                    crate::app_types::StartupPanelStage::HttpReady,
+                );
                 return Ok(());
             }
 
             if tcp_reachable {
                 ever_tcp_reachable = true;
                 if !tcp_ready_logged {
+                    crate::window::startup_panel::set_stage(
+                        self,
+                        crate::app_types::StartupPanelStage::TcpReachable,
+                    );
                     append_desktop_log(
                         "backend TCP port is reachable but HTTP dashboard is not ready yet; waiting",
                     );
@@ -137,5 +165,76 @@ impl BackendState {
             tcp_reachable,
             last_http_status_text
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::ErrorKind,
+        net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        thread,
+        time::Duration,
+    };
+
+    use super::BackendState;
+
+    struct TcpOnlyServer {
+        url: String,
+        stop: Arc<AtomicBool>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl TcpOnlyServer {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind tcp-only listener");
+            listener
+                .set_nonblocking(true)
+                .expect("set nonblocking listener");
+            let address = listener.local_addr().expect("listener local addr");
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_for_thread = Arc::clone(&stop);
+            let handle = thread::spawn(move || {
+                while !stop_for_thread.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((stream, _)) => drop(stream),
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            Self {
+                url: format!("http://{address}"),
+                stop,
+                handle: Some(handle),
+            }
+        }
+    }
+
+    impl Drop for TcpOnlyServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(handle) = self.handle.take() {
+                handle.join().expect("join tcp-only listener thread");
+            }
+        }
+    }
+
+    #[test]
+    fn existing_backend_startup_skip_requires_http_readiness() {
+        let server = TcpOnlyServer::start();
+        let state = BackendState {
+            backend_url: server.url.clone(),
+            ..BackendState::default()
+        };
+
+        assert!(!state.existing_backend_is_ready_for_startup());
     }
 }
