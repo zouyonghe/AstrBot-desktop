@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     path::PathBuf,
@@ -41,11 +41,51 @@ pub(crate) struct BackendState {
     pub(crate) child: Mutex<Option<Child>>,
     pub(crate) backend_url: String,
     pub(crate) restart_auth_token: Mutex<Option<String>>,
+    pub(crate) startup_panel: Mutex<StartupPanelState>,
     pub(crate) startup_loading_mode: Mutex<Option<&'static str>>,
     pub(crate) log_rotator_stop: Mutex<Option<Arc<AtomicBool>>>,
     pub(crate) exit_state: Mutex<exit_state::ExitStateMachine>,
     pub(crate) is_spawning: AtomicBool,
     pub(crate) is_restarting: AtomicBool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum StartupPanelStage {
+    ResolveLaunchPlan,
+    SpawnBackend,
+    TcpReachable,
+    HttpReady,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StartupPanelState {
+    pub(crate) stage: StartupPanelStage,
+    pub(crate) last_non_failed_stage: StartupPanelStage,
+    pub(crate) failure: Option<String>,
+    pub(crate) desktop_log_start_offset: u64,
+    pub(crate) backend_log_path: Option<PathBuf>,
+    pub(crate) backend_log_start_offset: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartupPanelStageItem {
+    pub(crate) key: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) done: bool,
+    pub(crate) active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartupPanelSnapshot {
+    pub(crate) stage: StartupPanelStage,
+    pub(crate) summary: String,
+    pub(crate) items: Vec<StartupPanelStageItem>,
+    pub(crate) desktop_log: Vec<String>,
+    pub(crate) backend_log: Vec<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -96,11 +136,25 @@ impl Default for BackendState {
                 DEFAULT_BACKEND_URL,
             ),
             restart_auth_token: Mutex::new(None),
+            startup_panel: Mutex::new(StartupPanelState::default()),
             startup_loading_mode: Mutex::new(None),
             log_rotator_stop: Mutex::new(None),
             exit_state: Mutex::new(exit_state::ExitStateMachine::default()),
             is_spawning: AtomicBool::new(false),
             is_restarting: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Default for StartupPanelState {
+    fn default() -> Self {
+        Self {
+            stage: StartupPanelStage::ResolveLaunchPlan,
+            last_non_failed_stage: StartupPanelStage::ResolveLaunchPlan,
+            failure: None,
+            desktop_log_start_offset: 0,
+            backend_log_path: None,
+            backend_log_start_offset: 0,
         }
     }
 }

@@ -98,6 +98,193 @@
         font-size: 14px;
       }
 
+      .startup-summary {
+        margin-top: 14px;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+      }
+
+      .startup-summary-copy {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .startup-summary-label {
+        flex-shrink: 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .startup-summary-text {
+        min-width: 0;
+        overflow: hidden;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .startup-summary-toggle {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .startup-summary-toggle[hidden] {
+        display: none;
+      }
+
+      .startup-summary-chevron {
+        width: 8px;
+        height: 8px;
+        border-right: 1.5px solid currentColor;
+        border-bottom: 1.5px solid currentColor;
+        transform: rotate(45deg);
+        transition: transform 0.18s ease;
+      }
+
+      .startup-summary-toggle[aria-expanded="true"] .startup-summary-chevron {
+        transform: rotate(225deg);
+      }
+
+      .startup-diagnostics {
+        margin-top: 10px;
+        display: grid;
+        gap: 10px;
+        max-height: 208px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 10px 12px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #fbfdff;
+      }
+
+      .startup-diagnostics[hidden] {
+        display: none;
+      }
+
+      .startup-stage-list {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 6px;
+        overflow-x: auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        scrollbar-width: none;
+      }
+
+      .startup-stage-list::-webkit-scrollbar {
+        display: none;
+      }
+
+      .startup-stage-chip {
+        flex: 0 0 auto;
+        padding: 4px 8px;
+        border: 1px solid #d8e3ed;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .startup-stage-chip[data-done="true"] {
+        border-color: #bfdceb;
+        background: #eef7fc;
+        color: #246b90;
+      }
+
+      .startup-stage-chip[data-active="true"] {
+        border-color: #3c96ca;
+        background: #e1f1fa;
+        color: #0f617f;
+      }
+
+      .startup-log-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        min-height: 0;
+      }
+
+      .startup-log-card {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+        padding: 8px 10px;
+        border: 1px solid #e5ecf3;
+        border-radius: 10px;
+        background: #ffffff;
+      }
+
+      .startup-log-label {
+        margin: 0;
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .startup-log-lines {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        max-height: 96px;
+        overflow: auto;
+        color: #334155;
+        font-family: "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .startup-log-line {
+        padding: 1px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .startup-log-line.is-empty {
+        color: var(--muted);
+      }
+
+      @media (max-width: 520px) {
+        .startup-log-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 460px) {
+        .panel {
+          padding: 20px 20px 18px;
+        }
+      }
+
       .dot {
         width: 8px;
         height: 8px;
@@ -142,6 +329,36 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="startup-status" role="status" aria-live="polite"></span>
         </div>
+        <div class="startup-summary">
+          <div class="startup-summary-copy">
+            <span id="startup-summary-label" class="startup-summary-label"></span>
+            <span id="startup-summary-text" class="startup-summary-text"></span>
+          </div>
+          <button
+            id="startup-diagnostics-toggle"
+            class="startup-summary-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="startup-diagnostics"
+            hidden
+          >
+            <span id="startup-diagnostics-toggle-text"></span>
+            <span class="startup-summary-chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+        <section id="startup-diagnostics" class="startup-diagnostics" hidden>
+          <ul id="startup-stage-list" class="startup-stage-list"></ul>
+          <div class="startup-log-grid">
+            <section class="startup-log-card">
+              <h2 id="startup-desktop-log-label" class="startup-log-label"></h2>
+              <ul id="startup-desktop-log-lines" class="startup-log-lines"></ul>
+            </section>
+            <section class="startup-log-card">
+              <h2 id="startup-backend-log-label" class="startup-log-label"></h2>
+              <ul id="startup-backend-log-lines" class="startup-log-lines"></ul>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
     <script src="./startup-copy.js"></script>
@@ -150,11 +367,44 @@
         const title = document.getElementById("startup-title");
         const desc = document.getElementById("startup-desc");
         const status = document.getElementById("startup-status");
-        if (!title || !desc || !status) return;
+        const summaryLabel = document.getElementById("startup-summary-label");
+        const summaryText = document.getElementById("startup-summary-text");
+        const diagnosticsToggle = document.getElementById("startup-diagnostics-toggle");
+        const diagnosticsToggleText = document.getElementById(
+          "startup-diagnostics-toggle-text"
+        );
+        const diagnosticsPanel = document.getElementById("startup-diagnostics");
+        const stageList = document.getElementById("startup-stage-list");
+        const desktopLogLabel = document.getElementById("startup-desktop-log-label");
+        const desktopLogLines = document.getElementById("startup-desktop-log-lines");
+        const backendLogLabel = document.getElementById("startup-backend-log-label");
+        const backendLogLines = document.getElementById("startup-backend-log-lines");
+        if (
+          !title ||
+          !desc ||
+          !status ||
+          !summaryLabel ||
+          !summaryText ||
+          !diagnosticsToggle ||
+          !diagnosticsToggleText ||
+          !diagnosticsPanel ||
+          !stageList ||
+          !desktopLogLabel ||
+          !desktopLogLines ||
+          !backendLogLabel ||
+          !backendLogLines
+        ) {
+          return;
+        }
         if (!window.astrbot || !window.astrbot.startupShell) return;
 
         const startupShell = window.astrbot.startupShell;
         const { STARTUP_MODES, STARTUP_COPY } = startupShell;
+        const {
+          STARTUP_DIAGNOSTICS_COPY,
+          STARTUP_PANEL_COMMANDS,
+          STARTUP_PANEL_POLL_INTERVAL_MS,
+        } = startupShell;
 
         const resolveLocaleKey = () => {
           const locale =
@@ -165,23 +415,198 @@
         };
 
         const localeKey = resolveLocaleKey();
+        if (document.documentElement) {
+          document.documentElement.lang = localeKey === "en" ? "en" : "zh-CN";
+        }
         const resolveStartupCopy = (mode) => {
           const languageCopy = STARTUP_COPY[localeKey] || STARTUP_COPY.zh;
           return languageCopy[mode] || languageCopy[STARTUP_MODES.LOADING];
+        };
+        const diagnosticsCopy =
+          STARTUP_DIAGNOSTICS_COPY[localeKey] || STARTUP_DIAGNOSTICS_COPY.zh;
+        const snapshotCommand =
+          typeof STARTUP_PANEL_COMMANDS?.GET_SNAPSHOT === "string"
+            ? STARTUP_PANEL_COMMANDS.GET_SNAPSHOT
+            : null;
+        const pollIntervalMs =
+          Number.isFinite(STARTUP_PANEL_POLL_INTERVAL_MS) &&
+          STARTUP_PANEL_POLL_INTERVAL_MS >= 400
+            ? STARTUP_PANEL_POLL_INTERVAL_MS
+            : 1500;
+        const invoke =
+          typeof window.__TAURI_INTERNALS__?.invoke === "function"
+            ? window.__TAURI_INTERNALS__.invoke
+            : typeof window.__TAURI__?.core?.invoke === "function"
+              ? window.__TAURI__.core.invoke.bind(window.__TAURI__.core)
+              : null;
+
+        let latestSnapshot = null;
+        let diagnosticsExpanded = false;
+        let pollInFlight = false;
+        let pollTimer = null;
+
+        const normalizeStatusValue = (value, fallback) =>
+          typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+        const setStatusText = (value) => {
+          const nextValue = normalizeStatusValue(value, summaryText.textContent);
+          if (status.textContent === nextValue) return;
+          status.textContent = nextValue;
+        };
+
+        const setSummaryText = (value) => {
+          const nextValue =
+            normalizeStatusValue(value, status.textContent);
+          summaryText.textContent = nextValue;
+          summaryText.title = nextValue;
+        };
+
+        const setDiagnosticsExpanded = (expanded) => {
+          diagnosticsExpanded = Boolean(expanded) && !!latestSnapshot;
+          diagnosticsPanel.hidden = !diagnosticsExpanded;
+          diagnosticsToggle.setAttribute(
+            "aria-expanded",
+            diagnosticsExpanded ? "true" : "false"
+          );
+          diagnosticsToggleText.textContent = diagnosticsExpanded
+            ? diagnosticsCopy.hideDetails
+            : diagnosticsCopy.showDetails;
+        };
+
+        const renderStageItems = (items) => {
+          stageList.replaceChildren();
+          const nextItems = Array.isArray(items) ? items.slice(0, 4) : [];
+          for (const item of nextItems) {
+            const chip = document.createElement("li");
+            const localizedLabel =
+              diagnosticsCopy.stageLabels[
+                typeof item?.key === "string" ? item.key : ""
+              ];
+            chip.className = "startup-stage-chip";
+            chip.dataset.done = item?.done === true ? "true" : "false";
+            chip.dataset.active = item?.active === true ? "true" : "false";
+            chip.textContent = localizedLabel || item?.label || "-";
+            stageList.append(chip);
+          }
+        };
+
+        const renderLogLines = (container, lines) => {
+          container.replaceChildren();
+          const nextLines = Array.isArray(lines)
+            ? lines.filter((line) => typeof line === "string" && line.trim()).slice(-8)
+            : [];
+
+          if (nextLines.length === 0) {
+            const line = document.createElement("li");
+            line.className = "startup-log-line is-empty";
+            line.textContent = diagnosticsCopy.emptyLogLabel;
+            container.append(line);
+            return;
+          }
+
+          for (const entry of nextLines) {
+            const line = document.createElement("li");
+            line.className = "startup-log-line";
+            line.textContent = entry;
+            container.append(line);
+          }
+        };
+
+        const resolveSnapshotSummary = (snapshot) => {
+          const localizedSummary =
+            diagnosticsCopy.stageSummaries?.[
+              typeof snapshot?.stage === "string" ? snapshot.stage : ""
+            ];
+          const snapshotSummary =
+            typeof snapshot?.summary === "string" && snapshot.summary.trim()
+              ? snapshot.summary.trim()
+              : "";
+          const isGenericFailureSummary =
+            snapshotSummary.toLowerCase() === "startup failed";
+
+          if (snapshot?.stage === "failed") {
+            if (!snapshotSummary || isGenericFailureSummary) {
+              return localizedSummary || status.textContent;
+            }
+
+            return snapshotSummary || localizedSummary || status.textContent;
+          }
+
+          return localizedSummary || snapshotSummary || status.textContent;
+        };
+
+        const applySnapshot = (snapshot) => {
+          if (!snapshot || typeof snapshot !== "object") return;
+          latestSnapshot = snapshot;
+          renderStageItems(snapshot.items);
+          renderLogLines(desktopLogLines, snapshot.desktopLog);
+          renderLogLines(backendLogLines, snapshot.backendLog);
+          setStatusText(resolveSnapshotSummary(snapshot));
+          setSummaryText(resolveSnapshotSummary(snapshot));
+          diagnosticsToggle.hidden = false;
+          setDiagnosticsExpanded(diagnosticsExpanded);
         };
 
         const applyStartupMode = (mode) => {
           const next = resolveStartupCopy(mode);
           title.textContent = next.title;
           desc.textContent = next.desc;
-          if (status.textContent === next.status) return;
-          status.textContent = next.status;
+          if (latestSnapshot) return;
+
+          setSummaryText(next.status);
+          setStatusText(next.status);
         };
+
+        const pollStartupPanelSnapshot = async () => {
+          if (typeof invoke !== "function" || !snapshotCommand || pollInFlight) return;
+
+          pollInFlight = true;
+          try {
+            const snapshot = await invoke(snapshotCommand);
+            applySnapshot(snapshot);
+          } catch {
+            // Keep showing the previous static copy or last successful snapshot.
+          } finally {
+            pollInFlight = false;
+          }
+        };
+
+        const startSnapshotPolling = () => {
+          if (typeof invoke !== "function" || !snapshotCommand) return;
+          void pollStartupPanelSnapshot();
+          pollTimer = window.setInterval(() => {
+            void pollStartupPanelSnapshot();
+          }, pollIntervalMs);
+          window.addEventListener(
+            "pagehide",
+            () => {
+              if (pollTimer !== null) {
+                window.clearInterval(pollTimer);
+                pollTimer = null;
+              }
+            },
+            { once: true }
+          );
+        };
+
+        summaryLabel.textContent = diagnosticsCopy.summaryLabel;
+        diagnosticsToggleText.textContent = diagnosticsCopy.showDetails;
+        stageList.setAttribute("aria-label", diagnosticsCopy.stageListLabel);
+        desktopLogLabel.textContent = diagnosticsCopy.desktopLogLabel;
+        backendLogLabel.textContent = diagnosticsCopy.backendLogLabel;
+        diagnosticsToggle.hidden = true;
+        setDiagnosticsExpanded(false);
+
+        diagnosticsToggle.addEventListener("click", () => {
+          if (!latestSnapshot) return;
+          setDiagnosticsExpanded(!diagnosticsExpanded);
+        });
 
         window.__astrbotSetStartupMode = (mode) => {
           applyStartupMode(typeof mode === "string" ? mode : STARTUP_MODES.LOADING);
         };
         applyStartupMode(STARTUP_MODES.LOADING);
+        startSnapshotPolling();
       })();
     </script>
   </body>

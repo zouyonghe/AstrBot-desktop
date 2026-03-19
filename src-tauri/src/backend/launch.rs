@@ -150,6 +150,7 @@ impl BackendState {
                 "backend",
                 false,
             );
+            crate::window::startup_panel::remember_backend_log_path(self, log_path.clone());
             let stdout_file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -185,6 +186,10 @@ impl BackendState {
             build_debug_command(plan),
             plan.cwd.display()
         ));
+        crate::window::startup_panel::set_stage(
+            self,
+            crate::app_types::StartupPanelStage::SpawnBackend,
+        );
         *self
             .child
             .lock()
