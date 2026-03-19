@@ -33,7 +33,7 @@ runs:
         node-version: ${{ inputs.node-version }}
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@v4.2.0
+      uses: pnpm/action-setup@v4.4.0
       with:
         version: ${{ inputs.pnpm-version }}
 
