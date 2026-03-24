@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   copyTree,
+  createPythonInstallEnv,
+  prunePythonBytecodeArtifacts,
   resolveAndValidateRuntimeSource,
   resolveRuntimePython,
 } from './runtime-layout-utils.mjs';
@@ -466,11 +468,13 @@ const installRuntimeDependencies = (runtimePython) => {
       'pip',
       '--disable-pip-version-check',
       'install',
+      '--no-compile',
       ...pipArgs,
     ];
     return spawnSync(runtimePython.absolute, installArgs, {
       cwd: outputDir,
       stdio: 'inherit',
+      env: createPythonInstallEnv(),
       windowsHide: true,
     });
   };
@@ -561,6 +565,20 @@ const installRuntimeDependencies = (runtimePython) => {
         `Windows MSVC runtime installation failed with exit code ${msvcRuntimeResult.status}.`,
       );
     }
+  }
+
+  const bytecodeCleanupStats = prunePythonBytecodeArtifacts(runtimeDir);
+  if (
+    bytecodeCleanupStats.removedCacheDirs > 0 ||
+    bytecodeCleanupStats.removedBytecodeFiles > 0 ||
+    bytecodeCleanupStats.removedOrphanBytecodeFiles > 0
+  ) {
+    console.log(
+      '[build-backend] removed Python bytecode artifacts ' +
+        `(${bytecodeCleanupStats.removedCacheDirs} cache dirs, ` +
+        `${bytecodeCleanupStats.removedBytecodeFiles} cached files, ` +
+        `${bytecodeCleanupStats.removedOrphanBytecodeFiles} orphan files).`,
+    );
   }
 };
 

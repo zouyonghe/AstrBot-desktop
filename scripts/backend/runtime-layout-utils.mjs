@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const isBytecodeFile = (entryName) => entryName.endsWith('.pyc') || entryName.endsWith('.pyo');
+
 const shouldCopy = (sourcePath) => {
   const base = path.basename(sourcePath);
   if (base === '__pycache__' || base === '.pytest_cache' || base === '.ruff_cache') {
@@ -9,7 +11,7 @@ const shouldCopy = (sourcePath) => {
   if (base === '.git' || base === '.mypy_cache' || base === '.DS_Store') {
     return false;
   }
-  if (base.endsWith('.pyc') || base.endsWith('.pyo')) {
+  if (isBytecodeFile(base)) {
     return false;
   }
   return true;
@@ -22,6 +24,64 @@ export const copyTree = (fromPath, toPath, { dereference = false } = {}) => {
     filter: shouldCopy,
     dereference,
   });
+};
+
+export const createPythonInstallEnv = (env = process.env) => ({
+  ...env,
+  PYTHONDONTWRITEBYTECODE: '1',
+});
+
+const countFilesInDirectory = (directoryPath) => {
+  let total = 0;
+  for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+    const entryPath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      total += countFilesInDirectory(entryPath);
+      continue;
+    }
+    total += 1;
+  }
+  return total;
+};
+
+export const prunePythonBytecodeArtifacts = (rootDir) => {
+  const stats = {
+    removedCacheDirs: 0,
+    removedBytecodeFiles: 0,
+    removedOrphanBytecodeFiles: 0,
+  };
+
+  const visit = (directoryPath) => {
+    for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+      const entryPath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        if (entry.name === '__pycache__') {
+          stats.removedCacheDirs += 1;
+          stats.removedBytecodeFiles += countFilesInDirectory(entryPath);
+          fs.rmSync(entryPath, { recursive: true, force: true });
+          continue;
+        }
+
+        visit(entryPath);
+        continue;
+      }
+
+      if (!isBytecodeFile(entry.name)) {
+        continue;
+      }
+
+      stats.removedOrphanBytecodeFiles += 1;
+      fs.rmSync(entryPath, { force: true });
+    }
+  };
+
+  if (!fs.existsSync(rootDir)) {
+    return stats;
+  }
+
+  visit(rootDir);
+  return stats;
 };
 
 export const resolveAndValidateRuntimeSource = ({ projectRoot, outputDir, runtimeSource }) => {
