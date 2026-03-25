@@ -31,19 +31,6 @@ export const createPythonInstallEnv = (env = process.env) => ({
   PYTHONDONTWRITEBYTECODE: '1',
 });
 
-const countFilesInDirectory = (directoryPath) => {
-  let total = 0;
-  for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
-    const entryPath = path.join(directoryPath, entry.name);
-    if (entry.isDirectory()) {
-      total += countFilesInDirectory(entryPath);
-      continue;
-    }
-    total += 1;
-  }
-  return total;
-};
-
 export const prunePythonBytecodeArtifacts = (rootDir) => {
   const stats = {
     removedCacheDirs: 0,
@@ -51,28 +38,36 @@ export const prunePythonBytecodeArtifacts = (rootDir) => {
     removedOrphanBytecodeFiles: 0,
   };
 
-  const visit = (directoryPath) => {
+  const visit = (directoryPath, { inPycache = false } = {}) => {
     for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
       const entryPath = path.join(directoryPath, entry.name);
 
       if (entry.isDirectory()) {
-        if (entry.name === '__pycache__') {
+        const childInPycache = inPycache || entry.name === '__pycache__';
+
+        if (entry.name === '__pycache__' && !inPycache) {
           stats.removedCacheDirs += 1;
-          stats.removedBytecodeFiles += countFilesInDirectory(entryPath);
-          fs.rmSync(entryPath, { recursive: true, force: true });
-          continue;
         }
 
-        visit(entryPath);
+        visit(entryPath, { inPycache: childInPycache });
+
+        if (childInPycache) {
+          fs.rmdirSync(entryPath);
+        }
+
         continue;
       }
 
-      if (!isBytecodeFile(entry.name)) {
+      if (inPycache) {
+        stats.removedBytecodeFiles += 1;
+        fs.rmSync(entryPath, { force: true });
         continue;
       }
 
-      stats.removedOrphanBytecodeFiles += 1;
-      fs.rmSync(entryPath, { force: true });
+      if (isBytecodeFile(entry.name)) {
+        stats.removedOrphanBytecodeFiles += 1;
+        fs.rmSync(entryPath, { force: true });
+      }
     }
   };
 
