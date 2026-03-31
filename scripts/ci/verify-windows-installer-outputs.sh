@@ -5,8 +5,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 
-if [ -z "${WINDOWS_INSTALLER_EXE_GLOBS:-}" ]; then
-  echo "WINDOWS_INSTALLER_EXE_GLOBS is required." >&2
+if [ -z "${WINDOWS_RELEASE_ASSET_GLOBS:-}" ]; then
+  echo "WINDOWS_RELEASE_ASSET_GLOBS is required." >&2
   exit 1
 fi
 
@@ -23,7 +23,7 @@ missing_patterns=0
     # globs and intentionally rejects `**` to avoid silent mismatches when
     # `globstar` is not enabled.
     if [[ "${pattern}" == *"**"* ]]; then
-      echo "Unsupported WINDOWS_INSTALLER_EXE_GLOBS pattern '${pattern}': '**' requires globstar and is not supported here." >&2
+      echo "Unsupported WINDOWS_RELEASE_ASSET_GLOBS pattern '${pattern}': '**' requires globstar and is not supported here." >&2
       missing_patterns=1
       continue
     fi
@@ -31,14 +31,14 @@ missing_patterns=0
     # Use compgen + mapfile to preserve spaces in matched paths.
     mapfile -t matches < <(compgen -G "${pattern}" || true)
     if [ "${#matches[@]}" -eq 0 ]; then
-      echo "Missing Windows installer output for pattern: ${pattern}" >&2
+      echo "Missing Windows release asset output for pattern: ${pattern}" >&2
       missing_patterns=1
       continue
     fi
 
-    echo "Detected Windows installers for pattern ${pattern}:"
+    echo "Detected Windows release assets for pattern ${pattern}:"
     printf '  %s\n' "${matches[@]}"
-  done <<< "${WINDOWS_INSTALLER_EXE_GLOBS}"
+  done <<< "${WINDOWS_RELEASE_ASSET_GLOBS}"
 
   if [ "${missing_patterns}" -ne 0 ]; then
     exit 1

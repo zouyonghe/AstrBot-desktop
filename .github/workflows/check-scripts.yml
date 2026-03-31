@@ -64,3 +64,19 @@ jobs:
             exit 0
           fi
           python3 -m compileall -q scripts
+
+      - name: Run Python script behavior tests
+        run: |
+          set -euo pipefail
+          if [ ! -d scripts/ci ]; then
+            echo "scripts/ci directory does not exist, skip Python script tests."
+            exit 0
+          fi
+
+          mapfile -t test_files < <(find scripts/ci -type f -name 'test_*.py' | sort)
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "No Python script tests found (test_*.py), skip."
+            exit 0
+          fi
+
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py'

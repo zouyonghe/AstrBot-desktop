@@ -432,8 +432,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       ASTRBOT_WINDOWS_BUNDLES: nsis
-      WINDOWS_INSTALLER_EXE_GLOBS: |
+      WINDOWS_RELEASE_ASSET_GLOBS: |
         src-tauri/target/release/bundle/nsis/*.exe
+        src-tauri/target/release/bundle/nsis/*portable*.zip
     strategy:
       fail-fast: false
       matrix:
@@ -482,6 +483,14 @@ jobs:
           set -euo pipefail
           node scripts/ci/backend-smoke-test.mjs --label "windows-${{ matrix.arch }}"
 
+      - name: Package portable zip artifact (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci.package_windows_portable \
+            --bundle-dir src-tauri/target/release/bundle/nsis \
+            --output-dir src-tauri/target/release/bundle/nsis
+
       - name: Verify Windows installer outputs
         shell: bash
         run: bash scripts/ci/verify-windows-installer-outputs.sh
@@ -492,9 +501,10 @@ jobs:
           name: astrbot-desktop-tauri-${{ needs.resolve_build_context.outputs.astrbot_version }}-windows-${{ matrix.arch }}
           if-no-files-found: error
           # Only upload Windows installer executables.
-          # A broad **/*.exe pattern also matches bundled Python runtime helpers.
+          # Keep explicit globs here so we only publish the installer plus the
+          # portable zip, not bundled helper executables from the embedded runtime.
           path: |
-            ${{ env.WINDOWS_INSTALLER_EXE_GLOBS }}
+            ${{ env.WINDOWS_RELEASE_ASSET_GLOBS }}
             src-tauri/target/release/bundle/nsis/*.exe.sig
 
   release:
@@ -594,7 +604,8 @@ jobs:
             - Source: `${{ needs.resolve_build_context.outputs.source_git_url }}`
             - Ref: `${{ needs.resolve_build_context.outputs.source_git_ref }}`
             - Mode: `${{ needs.resolve_build_context.outputs.build_mode }}`
-            - Windows installer format: `nsis`.
+            - Windows package formats: `nsis installer` and `portable zip`.
+            - Windows portable zip uses manual replacement updates and requires WebView2 to already exist on the host.
           generate_release_notes: true
           prerelease: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
           make_latest: ${{ needs.resolve_build_context.outputs.release_make_latest == 'true' }}

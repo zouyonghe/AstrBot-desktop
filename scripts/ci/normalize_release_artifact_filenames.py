@@ -61,6 +61,12 @@ CANONICALIZE_RULES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
             MACOS_CANONICAL_ARTIFACT_STEM_PATTERN,
             "AstrBot_{version}_macos_{arch}",
         ),
+        (
+            re.compile(
+                rf"{WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT}(?:-portable|_portable)(?P<nightly_suffix>_nightly_[0-9a-fA-F]{{8}})?$"
+            ),
+            "AstrBot_{version}_windows_{arch}_portable{nightly_suffix}",
+        ),
     ),
     ".app.tar.gz": (
         (
@@ -155,7 +161,7 @@ def canonicalize_stem(
         match = pattern.fullmatch(stem)
         if not match:
             continue
-        groups = match.groupdict()
+        groups = {key: value or "" for key, value in match.groupdict().items()}
         if "arch" in groups:
             groups["arch"] = normalize_arch(groups["arch"], warned_unknown_arches)
         return normalized_template.format(**groups), True

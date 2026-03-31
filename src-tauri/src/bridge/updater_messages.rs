@@ -1,7 +1,7 @@
 pub(crate) const DESKTOP_UPDATER_UNSUPPORTED_REASON: &str =
     "Desktop app updater is not available on this platform yet.";
 pub(crate) const DESKTOP_UPDATER_MANUAL_DOWNLOAD_REASON: &str =
-    "This Linux installation method does not support automatic updates. Please download the latest package from your installation source.";
+    "This installation method does not support automatic updates. Please download the latest package from your installation source.";
 const DEFAULT_DESKTOP_UPDATER_MANUAL_DOWNLOAD_URL: &str =
     "https://github.com/AstrBotDevs/AstrBot-desktop/releases/latest";
 
