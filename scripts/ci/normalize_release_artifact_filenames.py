@@ -155,6 +155,10 @@ def strip_nightly_suffix(stem: str) -> str:
     return NIGHTLY_HASH_PATTERN.sub("", stem)
 
 
+def should_preserve_original_nightly_suffix(stem: str, ext: str) -> bool:
+    return ext == ".zip" and ("_portable" in stem or "-portable" in stem)
+
+
 def canonicalize_stem(
     stem: str, ext: str, warned_unknown_arches: set[str]
 ) -> tuple[str, bool]:
@@ -235,15 +239,21 @@ def main() -> int:
 
         original_name = path.name
         original_stem = strip_extension(original_name, ext)
+        canonical_ext = canonicalization_extension(ext)
 
-        normalized_stem, matched = canonicalize_stem(
-            original_stem, canonicalization_extension(ext), warned_unknown_arches
-        )
-        if not matched:
-            stripped_stem = strip_nightly_suffix(original_stem)
+        stripped_stem = strip_nightly_suffix(original_stem)
+        candidate_stems = [stripped_stem]
+        if should_preserve_original_nightly_suffix(original_stem, canonical_ext):
+            candidate_stems.insert(0, original_stem)
+
+        normalized_stem = original_stem
+        matched = False
+        for candidate_stem in candidate_stems:
             normalized_stem, matched = canonicalize_stem(
-                stripped_stem, canonicalization_extension(ext), warned_unknown_arches
+                candidate_stem, canonical_ext, warned_unknown_arches
             )
+            if matched:
+                break
 
         if not matched:
             unmatched_messages.append(
