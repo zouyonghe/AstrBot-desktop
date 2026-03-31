@@ -483,6 +483,21 @@ jobs:
           set -euo pipefail
           node scripts/ci/backend-smoke-test.mjs --label "windows-${{ matrix.arch }}"
 
+      - name: Ensure 7-Zip is available (Windows)
+        shell: pwsh
+        run: |
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            choco install 7zip --yes --no-progress
+          }
+
+          $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            throw "7-Zip executable not found after installation attempt."
+          }
+
+          "SEVEN_ZIP_EXE=$sevenZip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Package portable zip artifact (Windows)
         shell: bash
         run: |

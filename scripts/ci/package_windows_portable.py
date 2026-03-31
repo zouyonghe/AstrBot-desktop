@@ -12,12 +12,16 @@ import tempfile
 from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
-from scripts.ci.lib.release_artifacts import WINDOWS_UPDATER_PATTERNS, match_any
+from scripts.ci.lib.release_artifacts import (
+    SHORT_SHA_PATTERN,
+    WINDOWS_UPDATER_PATTERNS,
+    match_any,
+)
 
 
 WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>[^_]+)_windows_(?P<arch>x86_64|x64|amd64|arm64|aarch64)"
-    r"_setup(?P<nightly_suffix>_nightly_[0-9A-Fa-f]{7,40})?\.exe$"
+    rf"_setup(?P<nightly_suffix>_nightly_{SHORT_SHA_PATTERN})?\.exe$"
 )
 
 PORTABLE_MARKER_NAME = "portable.flag"

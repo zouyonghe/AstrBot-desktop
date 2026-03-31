@@ -73,23 +73,43 @@ mod tests {
     use super::*;
     use std::{
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    fn create_temp_case_dir(name: &str) -> PathBuf {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "astrbot-desktop-updater-mode-test-{}-{}-{}",
-            std::process::id(),
-            ts,
-            name
-        ));
-        fs::create_dir_all(&dir).expect("create temp case dir");
-        dir
+    struct ScopedTempDir {
+        path: PathBuf,
+    }
+
+    impl ScopedTempDir {
+        fn new(name: &str) -> Self {
+            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "astrbot-desktop-updater-mode-test-{}-{}-{}-{}",
+                std::process::id(),
+                ts,
+                NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                name,
+            ));
+            fs::create_dir_all(&dir).expect("create temp case dir");
+            Self { path: dir }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for ScopedTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 
     #[test]
@@ -122,13 +142,9 @@ mod tests {
 
     #[test]
     fn is_windows_portable_runtime_with_exe_dir_detects_marker_file() {
-        let dir = create_temp_case_dir("portable-marker");
-        fs::write(dir.join(PORTABLE_RUNTIME_MARKER), b"").expect("write marker");
+        let dir = ScopedTempDir::new("portable-marker");
+        fs::write(dir.path().join(PORTABLE_RUNTIME_MARKER), b"").expect("write marker");
 
-        assert!(is_windows_portable_runtime_with_exe_dir(Some(
-            dir.as_path()
-        )));
-
-        fs::remove_dir_all(&dir).expect("cleanup temp case dir");
+        assert!(is_windows_portable_runtime_with_exe_dir(Some(dir.path())));
     }
 }

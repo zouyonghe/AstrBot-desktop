@@ -13,6 +13,7 @@ from .lib.release_artifacts import (
     ARTIFACT_EXTENSIONS,
     LOCALE_PATTERN,
     MACOS_CANONICAL_ARTIFACT_STEM_PATTERN,
+    SHORT_SHA_PATTERN,
     VERSION_PATTERN,
     WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT,
 )
@@ -63,7 +64,7 @@ CANONICALIZE_RULES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
         ),
         (
             re.compile(
-                rf"{WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT}(?:-portable|_portable)(?P<nightly_suffix>_nightly_[0-9a-fA-F]{{8}})?$"
+                rf"{WINDOWS_ARTIFACT_STEM_PATTERN_FRAGMENT}(?:-portable|_portable)(?P<nightly_suffix>_nightly_{SHORT_SHA_PATTERN})?$"
             ),
             "AstrBot_{version}_windows_{arch}_portable{nightly_suffix}",
         ),
@@ -235,10 +236,14 @@ def main() -> int:
         original_name = path.name
         original_stem = strip_extension(original_name, ext)
 
-        stripped_stem = strip_nightly_suffix(original_stem)
         normalized_stem, matched = canonicalize_stem(
-            stripped_stem, canonicalization_extension(ext), warned_unknown_arches
+            original_stem, canonicalization_extension(ext), warned_unknown_arches
         )
+        if not matched:
+            stripped_stem = strip_nightly_suffix(original_stem)
+            normalized_stem, matched = canonicalize_stem(
+                stripped_stem, canonicalization_extension(ext), warned_unknown_arches
+            )
 
         if not matched:
             unmatched_messages.append(
