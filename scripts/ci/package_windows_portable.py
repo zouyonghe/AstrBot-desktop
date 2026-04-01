@@ -25,13 +25,7 @@ WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
 WINDOWS_LEGACY_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64|aarch64)-setup\.exe$"
 )
-LEGACY_NIGHTLY_BASE_VERSION_PATTERN = r"[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*"
-LEGACY_NIGHTLY_VERSION_RE = re.compile(
-    rf"^(?P<version>{LEGACY_NIGHTLY_BASE_VERSION_PATTERN})-nightly[._-](?P<date>[0-9]{{8}})[._-](?P<sha>{SHORT_SHA_PATTERN})$"
-)
-MALFORMED_LEGACY_NIGHTLY_VERSION_RE = re.compile(
-    rf"^(?P<version>{LEGACY_NIGHTLY_BASE_VERSION_PATTERN})-nightly(?:[._-].*)?$"
-)
+LEGACY_NIGHTLY_BASE_VERSION_RE = re.compile(r"^[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*$")
 
 PORTABLE_README_NAME = "README-portable.txt"
 PORTABLE_README_TEXT = """AstrBot Windows portable package
@@ -119,21 +113,28 @@ def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
 
 
 def normalize_legacy_nightly_version(version: str) -> tuple[str, str]:
-    nightly_match = LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
-    if nightly_match and is_valid_nightly_date(nightly_match.group("date")):
-        base_version = nightly_match.group("version")
-        nightly_suffix = f"_nightly_{nightly_match.group('sha')}"
-        return base_version, nightly_suffix
+    if "-nightly" not in version:
+        return version, ""
 
-    malformed_nightly_match = MALFORMED_LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
-    if malformed_nightly_match:
-        return malformed_nightly_match.group("version"), ""
+    base_version, separator, nightly_part = version.partition("-nightly")
+    if not separator or not LEGACY_NIGHTLY_BASE_VERSION_RE.fullmatch(base_version):
+        return version, ""
 
-    return version, ""
+    nightly_part = nightly_part.lstrip("._-")
+    if not nightly_part:
+        return base_version, ""
 
+    parts = re.split(r"[._-]", nightly_part, maxsplit=2)
+    if len(parts) < 2:
+        return base_version, ""
 
-def portable_executable_name(project_config: ProjectConfig) -> str:
-    return f"{project_config.product_name}.exe"
+    date_value, sha = parts[0], parts[1]
+    if not is_valid_nightly_date(date_value):
+        return base_version, ""
+    if not re.fullmatch(SHORT_SHA_PATTERN, sha):
+        return base_version, ""
+
+    return base_version, f"_nightly_{sha}"
 
 
 def load_project_config() -> ProjectConfig:
@@ -251,7 +252,7 @@ def populate_portable_root(
     destination_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(
         main_executable_path,
-        destination_root / portable_executable_name(project_config),
+        destination_root / f"{project_config.product_name}.exe",
     )
 
     webview_loader = release_dir / "WebView2Loader.dll"
