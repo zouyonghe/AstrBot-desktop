@@ -127,6 +127,34 @@ class PackageWindowsPortableTests(unittest.TestCase):
             self.assertEqual(project_config.binary_name, "astrbot-desktop-tauri")
             self.assertEqual(project_config.portable_marker_name, "portable.flag")
 
+    def test_load_cargo_package_name_supports_inline_comments(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+            cargo_toml_path.parent.mkdir(parents=True)
+            cargo_toml_path.write_text(
+                '[package]\nname = "astrbot-desktop-tauri" # main binary\n'
+            )
+
+            self.assertEqual(
+                MODULE.load_cargo_package_name(project_root),
+                "astrbot-desktop-tauri",
+            )
+
+    def test_load_cargo_package_name_prefers_explicit_bin_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+            cargo_toml_path.parent.mkdir(parents=True)
+            cargo_toml_path.write_text(
+                "[package]\n"
+                'name = "astrbot-desktop-tauri"\n\n'
+                "[[bin]]\n"
+                'name = "AstrBot"\n'
+            )
+
+            self.assertEqual(MODULE.load_cargo_package_name(project_root), "AstrBot")
+
     def test_resolve_main_executable_path_uses_binary_name_not_product_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)

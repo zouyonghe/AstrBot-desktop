@@ -9,6 +9,7 @@ import pathlib
 import re
 import shutil
 import tempfile
+import tomllib
 from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
@@ -151,22 +152,26 @@ def load_cargo_package_name(project_root: pathlib.Path) -> str:
     if not cargo_toml_path.is_file():
         raise FileNotFoundError(f"Cargo.toml not found: {cargo_toml_path}")
 
-    package_section = False
-    for raw_line in cargo_toml_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("["):
-            package_section = line == "[package]"
-            continue
-        if package_section and line.startswith("name"):
-            _, _, value = line.partition("=")
-            binary_name = value.strip().strip('"').strip("'")
-            if binary_name:
-                return binary_name
-            break
+    with cargo_toml_path.open("rb") as handle:
+        cargo_data = tomllib.load(handle)
 
-    raise ValueError(f"Missing package.name in {CARGO_TOML_RELATIVE_PATH}")
+    bins = cargo_data.get("bin")
+    if isinstance(bins, list):
+        for entry in bins:
+            if isinstance(entry, dict):
+                binary_name = str(entry.get("name", "")).strip()
+                if binary_name:
+                    return binary_name
+
+    package_table = cargo_data.get("package")
+    if not isinstance(package_table, dict):
+        raise ValueError(f"Missing [package] in {CARGO_TOML_RELATIVE_PATH}")
+
+    binary_name = str(package_table.get("name", "")).strip()
+    if not binary_name:
+        raise ValueError(f"Missing [package].name in {CARGO_TOML_RELATIVE_PATH}")
+
+    return binary_name
 
 
 def resolve_product_name(project_root: pathlib.Path) -> str:
