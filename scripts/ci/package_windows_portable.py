@@ -44,6 +44,7 @@ WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
 PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "portable-runtime-marker.txt"
 )
+WINDOWS_FILENAME_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,16 @@ def resolve_product_name(project_root: pathlib.Path) -> str:
     product_name = str(config.get("productName", "")).strip()
     if not product_name:
         raise ValueError(f"Missing productName in {TAURI_CONFIG_RELATIVE_PATH}")
+    if product_name.lower().endswith(".exe"):
+        product_name = product_name[:-4].rstrip()
+    if not product_name:
+        raise ValueError(
+            f"productName resolves to an empty executable name in {TAURI_CONFIG_RELATIVE_PATH}"
+        )
+    if WINDOWS_FILENAME_INVALID_CHARS_RE.search(product_name):
+        raise ValueError(
+            f"productName contains characters invalid Windows filename characters: {product_name!r}"
+        )
     return product_name
 
 

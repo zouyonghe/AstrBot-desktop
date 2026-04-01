@@ -28,12 +28,23 @@ class PackageWindowsPortableTests(unittest.TestCase):
         )
 
     def test_installer_to_portable_name_normalizes_legacy_nightly_windows_name(self):
-        self.assertEqual(
-            MODULE.installer_to_portable_name(
-                "AstrBot_4.29.0-nightly.20260401.deadbeef_aarch64-setup.exe"
-            ),
-            "AstrBot_4.29.0_windows_arm64_portable_nightly_deadbeef.zip",
-        )
+        arch_cases = [
+            ("x64", "amd64"),
+            ("amd64", "amd64"),
+            ("arm64", "arm64"),
+            ("aarch64", "arm64"),
+        ]
+        separators = [".", "_", "-"]
+
+        for arch_input, arch_output in arch_cases:
+            for separator in separators:
+                with self.subTest(arch=arch_input, separator=separator):
+                    installer_name = f"AstrBot_4.29.0-nightly{separator}20260401{separator}deadbeef_{arch_input}-setup.exe"
+                    expected_name = f"AstrBot_4.29.0_windows_{arch_output}_portable_nightly_deadbeef.zip"
+                    self.assertEqual(
+                        MODULE.installer_to_portable_name(installer_name),
+                        expected_name,
+                    )
 
     def test_installer_to_portable_name_rejects_noncanonical_nightly_suffix_length(
         self,
@@ -135,6 +146,51 @@ class PackageWindowsPortableTests(unittest.TestCase):
             self.assertEqual(project_config.product_name, "AstrBot")
             self.assertEqual(project_config.binary_name, "astrbot-desktop-tauri")
             self.assertEqual(project_config.portable_marker_name, "portable.flag")
+
+    def test_load_project_config_from_rejects_product_name_with_invalid_windows_chars(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
+            tauri_config_path.parent.mkdir(parents=True)
+            tauri_config_path.write_text('{"productName":"AstrBot:Beta"}')
+            cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text("portable.flag\n")
+
+            with self.assertRaisesRegex(ValueError, "invalid Windows filename"):
+                MODULE.load_project_config_from(script_path)
+
+    def test_load_project_config_from_strips_exe_suffix_from_product_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
+            tauri_config_path.parent.mkdir(parents=True)
+            tauri_config_path.write_text('{"productName":"AstrBot.exe"}')
+            cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text("portable.flag\n")
+
+            project_config = MODULE.load_project_config_from(script_path)
+
+            self.assertEqual(project_config.product_name, "AstrBot")
 
     def test_load_cargo_package_name_supports_inline_comments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -301,13 +357,17 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 "Write-Host cleanup"
             )
 
+            project_config = MODULE.load_project_config_from(script_path)
+
             MODULE.populate_portable_root(
                 bundle_dir=bundle_dir,
                 destination_root=destination_root,
-                project_config=MODULE.load_project_config_from(script_path),
+                project_config=project_config,
             )
 
-            self.assertTrue((destination_root / "AstrBot.exe").is_file())
+            executable_name = f"{project_config.product_name}.exe"
+
+            self.assertTrue((destination_root / executable_name).is_file())
             self.assertFalse((destination_root / "astrbot-desktop-tauri.exe").exists())
             self.assertTrue((destination_root / "WebView2Loader.dll").is_file())
             self.assertTrue(
