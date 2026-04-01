@@ -11,19 +11,17 @@ import tempfile
 from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
-from scripts.ci.lib.release_artifacts import (
-    SHORT_SHA_PATTERN,
-    WINDOWS_UPDATER_PATTERNS,
-    match_any,
-)
+from scripts.ci.lib.release_artifacts import SHORT_SHA_PATTERN
 
 
 WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>[^_]+)_windows_(?P<arch>x86_64|x64|amd64|arm64|aarch64)"
     rf"_setup(?P<nightly_suffix>_nightly_{SHORT_SHA_PATTERN})?\.exe$"
 )
+WINDOWS_LEGACY_INSTALLER_RE = re.compile(
+    r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64|aarch64)-setup\.exe$"
+)
 
-PORTABLE_MARKER_NAME = "portable.flag"
 PORTABLE_README_NAME = "README-portable.txt"
 PORTABLE_README_TEXT = """AstrBot Windows portable package
 
@@ -36,6 +34,9 @@ BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
 WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
 WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "kill-backend-processes.ps1"
+)
+PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
+    pathlib.Path("src-tauri") / "windows" / "portable-runtime-marker.txt"
 )
 
 
@@ -63,6 +64,22 @@ def resolve_project_root() -> pathlib.Path:
     return resolve_project_root_from(pathlib.Path(__file__))
 
 
+def load_portable_runtime_marker(project_root: pathlib.Path) -> str:
+    marker_path = project_root / PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+    if not marker_path.is_file():
+        raise FileNotFoundError(
+            f"Portable runtime marker file not found: {marker_path}"
+        )
+
+    marker_name = marker_path.read_text(encoding="utf-8").strip()
+    if not marker_name:
+        raise ValueError(f"Portable runtime marker file is empty: {marker_path}")
+    return marker_name
+
+
+PORTABLE_MARKER_NAME = load_portable_runtime_marker(resolve_project_root())
+
+
 def installer_to_portable_name(installer_name: str) -> str:
     canonical_match = WINDOWS_CANONICAL_INSTALLER_RE.fullmatch(installer_name)
     if canonical_match:
@@ -72,7 +89,7 @@ def installer_to_portable_name(installer_name: str) -> str:
         nightly_suffix = canonical_match.group("nightly_suffix") or ""
         return f"{name}_{version}_windows_{arch}_portable{nightly_suffix}.zip"
 
-    legacy_match = match_any(installer_name, WINDOWS_UPDATER_PATTERNS)
+    legacy_match = WINDOWS_LEGACY_INSTALLER_RE.fullmatch(installer_name)
     if legacy_match:
         name = legacy_match.group("name")
         version = legacy_match.group("version")

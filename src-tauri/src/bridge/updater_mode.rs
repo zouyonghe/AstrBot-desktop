@@ -7,7 +7,7 @@ pub(crate) enum DesktopUpdateMode {
     Unsupported,
 }
 
-const PORTABLE_RUNTIME_MARKER: &str = "portable.flag";
+const PORTABLE_RUNTIME_MARKER: &str = env!("ASTRBOT_PORTABLE_RUNTIME_MARKER");
 
 fn resolve_desktop_update_mode_for_target(
     target_os: &str,
@@ -51,12 +51,9 @@ pub(crate) fn is_windows_portable_runtime() -> bool {
     is_windows_portable_runtime_with_exe_dir(exe_dir.as_deref())
 }
 
-fn windows_portable_runtime_for_target<F>(target_os: &str, detector: F) -> bool
-where
-    F: FnOnce() -> bool,
-{
+fn windows_portable_runtime_for_target(target_os: &str) -> bool {
     if target_os == "windows" {
-        detector()
+        is_windows_portable_runtime()
     } else {
         false
     }
@@ -75,7 +72,7 @@ pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
     resolve_desktop_update_mode_for_target(
         target_os,
         is_linux_appimage_runtime(),
-        windows_portable_runtime_for_target(target_os, is_windows_portable_runtime),
+        windows_portable_runtime_for_target(target_os),
     )
 }
 
@@ -83,7 +80,6 @@ pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
 
     #[test]
@@ -124,14 +120,7 @@ mod tests {
 
     #[test]
     fn windows_portable_runtime_for_target_skips_detection_on_non_windows() {
-        let called = AtomicBool::new(false);
-
-        let result = windows_portable_runtime_for_target("linux", || {
-            called.store(true, Ordering::Relaxed);
-            true
-        });
-
-        assert!(!result);
-        assert!(!called.load(Ordering::Relaxed));
+        assert!(!windows_portable_runtime_for_target("linux"));
+        assert!(!windows_portable_runtime_for_target("freebsd"));
     }
 }

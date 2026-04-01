@@ -12,6 +12,12 @@ class PackageWindowsPortableTests(unittest.TestCase):
             "AstrBot_4.29.0_windows_amd64_portable.zip",
         )
 
+    def test_installer_to_portable_name_accepts_canonical_windows_arm64_name(self):
+        self.assertEqual(
+            MODULE.installer_to_portable_name("AstrBot_4.29.0_windows_arm64_setup.exe"),
+            "AstrBot_4.29.0_windows_arm64_portable.zip",
+        )
+
     def test_installer_to_portable_name_accepts_canonical_nightly_windows_name(self):
         self.assertEqual(
             MODULE.installer_to_portable_name(
@@ -32,6 +38,12 @@ class PackageWindowsPortableTests(unittest.TestCase):
         self.assertEqual(
             MODULE.installer_to_portable_name("AstrBot_4.29.0_x64-setup.exe"),
             "AstrBot_4.29.0_windows_amd64_portable.zip",
+        )
+
+    def test_installer_to_portable_name_normalizes_legacy_windows_aarch64_name(self):
+        self.assertEqual(
+            MODULE.installer_to_portable_name("AstrBot_4.29.0_aarch64-setup.exe"),
+            "AstrBot_4.29.0_windows_arm64_portable.zip",
         )
 
     def test_installer_to_portable_name_rejects_unexpected_name(self):
@@ -77,6 +89,18 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 FileNotFoundError, "Unable to locate project root"
             ):
                 MODULE.resolve_project_root_from(script_path)
+
+    def test_load_portable_runtime_marker_reads_shared_marker_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+            marker_path.parent.mkdir(parents=True)
+            marker_path.write_text("portable.flag\n")
+
+            self.assertEqual(
+                MODULE.load_portable_runtime_marker(project_root),
+                "portable.flag",
+            )
 
     def test_iter_installer_paths_only_returns_installer_style_executables(self):
         with tempfile.TemporaryDirectory() as tmpdir:
