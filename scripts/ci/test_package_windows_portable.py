@@ -102,6 +102,28 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 "portable.flag",
             )
 
+    def test_load_project_config_from_returns_root_product_and_marker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
+            tauri_config_path.parent.mkdir(parents=True)
+            tauri_config_path.write_text('{"productName":"AstrBot"}')
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text("portable.flag\n")
+
+            project_config = MODULE.load_project_config_from(script_path)
+
+            self.assertEqual(project_config.root, project_root.resolve())
+            self.assertEqual(project_config.product_name, "AstrBot")
+            self.assertEqual(project_config.portable_marker_name, "portable.flag")
+
     def test_iter_installer_paths_only_returns_installer_style_executables(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             bundle_dir = Path(tmpdir)
@@ -122,6 +144,9 @@ class PackageWindowsPortableTests(unittest.TestCase):
     def test_populate_portable_root_copies_release_bundle_contents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
             bundle_dir = (
                 project_root / "src-tauri" / "target" / "release" / "bundle" / "nsis"
             )
@@ -131,7 +156,10 @@ class PackageWindowsPortableTests(unittest.TestCase):
             webui_dir = project_root / "resources" / "webui"
             windows_dir = project_root / "src-tauri" / "windows"
             tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
 
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
             bundle_dir.mkdir(parents=True)
             release_dir.mkdir(parents=True, exist_ok=True)
             backend_dir.mkdir(parents=True)
@@ -139,6 +167,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             windows_dir.mkdir(parents=True)
 
             tauri_config_path.write_text('{"productName":"AstrBot"}')
+            marker_path.write_text("portable.flag\n")
             (release_dir / "AstrBot.exe").write_text("exe")
             (release_dir / "WebView2Loader.dll").write_text("dll")
             (backend_dir / "runtime-manifest.json").write_text("{}")
@@ -151,7 +180,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             MODULE.populate_portable_root(
                 bundle_dir=bundle_dir,
                 destination_root=destination_root,
-                project_root=project_root,
+                project_config=MODULE.load_project_config_from(script_path),
             )
 
             self.assertTrue((destination_root / "AstrBot.exe").is_file())
@@ -165,12 +194,15 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 (destination_root / "resources" / "webui" / "index.html").is_file()
             )
             self.assertTrue((destination_root / "kill-backend-processes.ps1").is_file())
-            self.assertTrue((destination_root / MODULE.PORTABLE_MARKER_NAME).is_file())
+            self.assertTrue((destination_root / "portable.flag").is_file())
             self.assertTrue((destination_root / MODULE.PORTABLE_README_NAME).is_file())
 
     def test_populate_portable_root_rejects_missing_main_executable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
             bundle_dir = (
                 project_root / "src-tauri" / "target" / "release" / "bundle" / "nsis"
             )
@@ -178,12 +210,17 @@ class PackageWindowsPortableTests(unittest.TestCase):
             backend_dir = project_root / "resources" / "backend"
             webui_dir = project_root / "resources" / "webui"
             tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
 
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
             bundle_dir.mkdir(parents=True)
             backend_dir.mkdir(parents=True)
             webui_dir.mkdir(parents=True)
             tauri_config_path.parent.mkdir(parents=True, exist_ok=True)
             tauri_config_path.write_text('{"productName":"AstrBot"}')
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text("portable.flag\n")
             (backend_dir / "runtime-manifest.json").write_text("{}")
             (webui_dir / "index.html").write_text("<html></html>")
 
@@ -191,16 +228,21 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 MODULE.populate_portable_root(
                     bundle_dir=bundle_dir,
                     destination_root=destination_root,
-                    project_root=project_root,
+                    project_config=MODULE.load_project_config_from(script_path),
                 )
 
     def test_add_portable_runtime_files_writes_marker_and_readme(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
+            project_config = MODULE.ProjectConfig(
+                root=Path(tmpdir),
+                product_name="AstrBot",
+                portable_marker_name="portable.flag",
+            )
 
-            MODULE.add_portable_runtime_files(root)
+            MODULE.add_portable_runtime_files(root, project_config)
 
-            self.assertTrue((root / MODULE.PORTABLE_MARKER_NAME).is_file())
+            self.assertTrue((root / project_config.portable_marker_name).is_file())
             self.assertIn(
                 "manual updates",
                 (root / MODULE.PORTABLE_README_NAME).read_text().lower(),

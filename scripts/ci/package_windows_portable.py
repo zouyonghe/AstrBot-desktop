@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import pathlib
 import re
@@ -38,6 +39,13 @@ WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
 PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "portable-runtime-marker.txt"
 )
+
+
+@dataclass(frozen=True)
+class ProjectConfig:
+    root: pathlib.Path
+    product_name: str
+    portable_marker_name: str
 
 
 def normalize_arch(arch: str) -> str:
@@ -77,7 +85,19 @@ def load_portable_runtime_marker(project_root: pathlib.Path) -> str:
     return marker_name
 
 
-PORTABLE_MARKER_NAME = load_portable_runtime_marker(resolve_project_root())
+def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
+    project_root = resolve_project_root_from(start_path)
+    product_name = resolve_product_name(project_root)
+    portable_marker_name = load_portable_runtime_marker(project_root)
+    return ProjectConfig(
+        root=project_root,
+        product_name=product_name,
+        portable_marker_name=portable_marker_name,
+    )
+
+
+def load_project_config() -> ProjectConfig:
+    return load_project_config_from(pathlib.Path(__file__))
 
 
 def installer_to_portable_name(installer_name: str) -> str:
@@ -135,67 +155,55 @@ def resolve_release_dir(bundle_dir: pathlib.Path) -> pathlib.Path:
 
 
 def resolve_main_executable_path(
-    bundle_dir: pathlib.Path, project_root: pathlib.Path
+    bundle_dir: pathlib.Path, project_config: ProjectConfig
 ) -> pathlib.Path:
     release_dir = resolve_release_dir(bundle_dir)
-    main_executable_path = release_dir / f"{resolve_product_name(project_root)}.exe"
+    main_executable_path = release_dir / f"{project_config.product_name}.exe"
     if not main_executable_path.is_file():
         raise FileNotFoundError(f"Main executable not found: {main_executable_path}")
     return main_executable_path
 
 
-def copy_required_directory(
-    source_root: pathlib.Path, destination_root: pathlib.Path
-) -> None:
-    if not source_root.is_dir():
-        raise FileNotFoundError(f"Required directory not found: {source_root}")
-    shutil.copytree(source_root, destination_root)
-
-
-def copy_optional_file(
-    source_path: pathlib.Path, destination_path: pathlib.Path
-) -> None:
-    if source_path.is_file():
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, destination_path)
-
-
 def populate_portable_root(
     bundle_dir: pathlib.Path,
     destination_root: pathlib.Path,
-    project_root: pathlib.Path,
+    project_config: ProjectConfig,
 ) -> None:
     release_dir = resolve_release_dir(bundle_dir)
-    main_executable_path = resolve_main_executable_path(bundle_dir, project_root)
+    main_executable_path = resolve_main_executable_path(bundle_dir, project_config)
 
     destination_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(main_executable_path, destination_root / main_executable_path.name)
 
-    copy_optional_file(
-        release_dir / "WebView2Loader.dll",
-        destination_root / "WebView2Loader.dll",
-    )
-    copy_optional_file(
-        project_root / WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH,
-        destination_root / "kill-backend-processes.ps1",
-    )
+    webview_loader = release_dir / "WebView2Loader.dll"
+    if webview_loader.is_file():
+        shutil.copy2(webview_loader, destination_root / "WebView2Loader.dll")
+
+    cleanup_script = project_config.root / WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH
+    if cleanup_script.is_file():
+        shutil.copy2(cleanup_script, destination_root / "kill-backend-processes.ps1")
 
     resources_root = destination_root / "resources"
-    copy_required_directory(
-        project_root / BACKEND_RESOURCE_RELATIVE_PATH,
-        resources_root / "backend",
-    )
-    copy_required_directory(
-        project_root / WEBUI_RESOURCE_RELATIVE_PATH,
-        resources_root / "webui",
-    )
+    backend_src = project_config.root / BACKEND_RESOURCE_RELATIVE_PATH
+    if not backend_src.is_dir():
+        raise FileNotFoundError(f"Required directory not found: {backend_src}")
+    shutil.copytree(backend_src, resources_root / "backend")
 
-    add_portable_runtime_files(destination_root)
+    webui_src = project_config.root / WEBUI_RESOURCE_RELATIVE_PATH
+    if not webui_src.is_dir():
+        raise FileNotFoundError(f"Required directory not found: {webui_src}")
+    shutil.copytree(webui_src, resources_root / "webui")
+
+    add_portable_runtime_files(destination_root, project_config)
     validate_portable_root(destination_root)
 
 
-def add_portable_runtime_files(destination_root: pathlib.Path) -> None:
-    (destination_root / PORTABLE_MARKER_NAME).write_text("", encoding="utf-8")
+def add_portable_runtime_files(
+    destination_root: pathlib.Path, project_config: ProjectConfig
+) -> None:
+    (destination_root / project_config.portable_marker_name).write_text(
+        "", encoding="utf-8"
+    )
     (destination_root / PORTABLE_README_NAME).write_text(
         PORTABLE_README_TEXT,
         encoding="utf-8",
@@ -229,7 +237,9 @@ def iter_installer_paths(bundle_dir: pathlib.Path) -> Iterable[pathlib.Path]:
 
 
 def package_installer(
-    installer_path: pathlib.Path, output_dir: pathlib.Path, project_root: pathlib.Path
+    installer_path: pathlib.Path,
+    output_dir: pathlib.Path,
+    project_config: ProjectConfig,
 ) -> pathlib.Path:
     portable_name = installer_to_portable_name(installer_path.name)
     portable_stem = portable_name[: -len(".zip")]
@@ -242,7 +252,7 @@ def package_installer(
         populate_portable_root(
             bundle_dir=installer_path.parent,
             destination_root=archive_root,
-            project_root=project_root,
+            project_config=project_config,
         )
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -290,9 +300,9 @@ def main() -> int:
     if not installer_paths:
         raise SystemExit(f"No Windows installer executables found under: {bundle_dir}")
 
-    project_root = resolve_project_root()
+    project_config = load_project_config()
     for installer_path in installer_paths:
-        archive_path = package_installer(installer_path, output_dir, project_root)
+        archive_path = package_installer(installer_path, output_dir, project_config)
         print(f"[windows-portable] created: {archive_path.name}")
 
     return 0
