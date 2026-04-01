@@ -43,8 +43,24 @@ def normalize_arch(arch: str) -> str:
     return normalize_arch_alias(arch) or arch
 
 
+def resolve_project_root_from(start_path: pathlib.Path) -> pathlib.Path:
+    candidate = start_path.resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+
+    anchors = [TAURI_CONFIG_RELATIVE_PATH]
+    for root in (candidate, *candidate.parents):
+        if all((root / anchor).is_file() for anchor in anchors):
+            return root
+
+    raise FileNotFoundError(
+        "Unable to locate project root from "
+        f"{start_path}. Expected to find {TAURI_CONFIG_RELATIVE_PATH}."
+    )
+
+
 def resolve_project_root() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parents[2]
+    return resolve_project_root_from(pathlib.Path(__file__))
 
 
 def installer_to_portable_name(installer_name: str) -> str:

@@ -71,46 +71,8 @@ pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        sync::atomic::{AtomicU64, Ordering},
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    struct ScopedTempDir {
-        path: PathBuf,
-    }
-
-    impl ScopedTempDir {
-        fn new(name: &str) -> Self {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time before unix epoch")
-                .as_nanos();
-            let dir = std::env::temp_dir().join(format!(
-                "astrbot-desktop-updater-mode-test-{}-{}-{}-{}",
-                std::process::id(),
-                ts,
-                NEXT_ID.fetch_add(1, Ordering::Relaxed),
-                name,
-            ));
-            fs::create_dir_all(&dir).expect("create temp case dir");
-            Self { path: dir }
-        }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for ScopedTempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn resolve_desktop_update_mode_for_target_maps_platforms() {
@@ -142,7 +104,7 @@ mod tests {
 
     #[test]
     fn is_windows_portable_runtime_with_exe_dir_detects_marker_file() {
-        let dir = ScopedTempDir::new("portable-marker");
+        let dir = TempDir::with_prefix("portable-marker").expect("create temp case dir");
         fs::write(dir.path().join(PORTABLE_RUNTIME_MARKER), b"").expect("write marker");
 
         assert!(is_windows_portable_runtime_with_exe_dir(Some(dir.path())));

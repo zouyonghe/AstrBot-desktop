@@ -48,6 +48,36 @@ class PackageWindowsPortableTests(unittest.TestCase):
             Path("/tmp/project/src-tauri/target/aarch64-pc-windows-msvc/release"),
         )
 
+    def test_resolve_project_root_from_finds_anchor_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            script_path = (
+                project_root / "scripts" / "ci" / "package_windows_portable.py"
+            )
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
+            tauri_config_path.parent.mkdir(parents=True)
+            tauri_config_path.write_text('{"productName":"AstrBot"}')
+
+            self.assertEqual(
+                MODULE.resolve_project_root_from(script_path), project_root.resolve()
+            )
+
+    def test_resolve_project_root_from_rejects_missing_anchor_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = (
+                Path(tmpdir) / "scripts" / "ci" / "package_windows_portable.py"
+            )
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("# placeholder")
+
+            with self.assertRaisesRegex(
+                FileNotFoundError, "Unable to locate project root"
+            ):
+                MODULE.resolve_project_root_from(script_path)
+
     def test_populate_portable_root_copies_release_bundle_contents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
