@@ -125,7 +125,7 @@ def normalize_legacy_nightly_version(version: str) -> tuple[str, str]:
         return base_version, ""
 
     parts = re.split(r"[._-]", nightly_part, maxsplit=2)
-    if len(parts) < 2:
+    if len(parts) != 2:
         return base_version, ""
 
     date_value, sha = parts[0], parts[1]

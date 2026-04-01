@@ -90,6 +90,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             ("nightly{sep}20260401{sep}deadbee", "short_sha"),
             ("nightly{sep}20261301{sep}deadbeef", "invalid_date"),
             ("nightly{sep}20260401", "missing_sha"),
+            ("nightly{sep}20260401{sep}deadbeef{sep}extra", "extra_component"),
         ]
 
         for arch_input, arch_output in arch_cases:
@@ -248,11 +249,13 @@ class PackageWindowsPortableTests(unittest.TestCase):
             MODULE.load_project_config_from(layout["script_path"])
 
     def test_load_project_config_from_strips_exe_suffix_from_product_name(self):
-        layout = self.make_project_layout(product_name="AstrBot.exe")
+        for raw_name in ("AstrBot.exe", "AstrBot.EXE", "AstrBot.ExE", "AstrBot.exe   "):
+            with self.subTest(product_name=raw_name):
+                layout = self.make_project_layout(product_name=raw_name)
 
-        project_config = MODULE.load_project_config_from(layout["script_path"])
+                project_config = MODULE.load_project_config_from(layout["script_path"])
 
-        self.assertEqual(project_config.product_name, "AstrBot")
+                self.assertEqual(project_config.product_name, "AstrBot")
 
     def test_load_cargo_package_name_supports_inline_comments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
