@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import pathlib
 import re
@@ -23,8 +24,12 @@ WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
 WINDOWS_LEGACY_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64|aarch64)-setup\.exe$"
 )
+LEGACY_NIGHTLY_BASE_VERSION_PATTERN = r"[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*"
 LEGACY_NIGHTLY_VERSION_RE = re.compile(
-    rf"^(?P<version>.+?)-nightly[._-](?P<date>[0-9]{{8}})[._-](?P<sha>{SHORT_SHA_PATTERN})$"
+    rf"^(?P<version>{LEGACY_NIGHTLY_BASE_VERSION_PATTERN})-nightly[._-](?P<date>[0-9]{{8}})[._-](?P<sha>{SHORT_SHA_PATTERN})$"
+)
+MALFORMED_LEGACY_NIGHTLY_VERSION_RE = re.compile(
+    rf"^(?P<version>{LEGACY_NIGHTLY_BASE_VERSION_PATTERN})-nightly(?:[._-].*)?$"
 )
 
 PORTABLE_README_NAME = "README-portable.txt"
@@ -45,6 +50,15 @@ PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "portable-runtime-marker.txt"
 )
 WINDOWS_FILENAME_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
+WINDOWS_FILENAME_INVALID_TRAILING_RE = re.compile(r"[ .]+$")
+WINDOWS_RESERVED_DEVICE_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *{f"COM{i}" for i in range(1, 10)},
+    *{f"LPT{i}" for i in range(1, 10)},
+}
 
 
 @dataclass(frozen=True)
@@ -57,6 +71,35 @@ class ProjectConfig:
 
 def normalize_arch(arch: str) -> str:
     return normalize_arch_alias(arch) or arch
+
+
+def is_valid_nightly_date(date_value: str) -> bool:
+    try:
+        datetime.strptime(date_value, "%Y%m%d")
+    except ValueError:
+        return False
+    return True
+
+
+def validate_windows_filename(name: str) -> None:
+    if not name or name in {".", ".."}:
+        raise ValueError(f"invalid Windows filename: {name!r}")
+
+    if WINDOWS_FILENAME_INVALID_CHARS_RE.search(name):
+        raise ValueError(
+            f"invalid Windows filename {name!r}: contains characters invalid in Windows filenames"
+        )
+
+    if WINDOWS_FILENAME_INVALID_TRAILING_RE.search(name):
+        raise ValueError(
+            f"invalid Windows filename {name!r}: trailing spaces or dots are not allowed"
+        )
+
+    stem = name.split(".", 1)[0].upper()
+    if stem in WINDOWS_RESERVED_DEVICE_NAMES:
+        raise ValueError(
+            f"invalid Windows filename {name!r}: {stem!r} is a reserved device name"
+        )
 
 
 def resolve_project_root_from(start_path: pathlib.Path) -> pathlib.Path:
@@ -125,9 +168,15 @@ def installer_to_portable_name(installer_name: str) -> str:
         arch = normalize_arch(legacy_match.group("arch"))
         nightly_suffix = ""
         nightly_match = LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
-        if nightly_match:
+        if nightly_match and is_valid_nightly_date(nightly_match.group("date")):
             version = nightly_match.group("version")
             nightly_suffix = f"_nightly_{nightly_match.group('sha')}"
+        else:
+            malformed_nightly_match = MALFORMED_LEGACY_NIGHTLY_VERSION_RE.fullmatch(
+                version
+            )
+            if malformed_nightly_match:
+                version = malformed_nightly_match.group("version")
         return f"{name}_{version}_windows_{arch}_portable{nightly_suffix}.zip"
 
     raise ValueError(
@@ -194,10 +243,7 @@ def resolve_product_name(project_root: pathlib.Path) -> str:
         raise ValueError(
             f"productName resolves to an empty executable name in {TAURI_CONFIG_RELATIVE_PATH}"
         )
-    if WINDOWS_FILENAME_INVALID_CHARS_RE.search(product_name):
-        raise ValueError(
-            f"productName contains characters invalid Windows filename characters: {product_name!r}"
-        )
+    validate_windows_filename(product_name)
     return product_name
 
 

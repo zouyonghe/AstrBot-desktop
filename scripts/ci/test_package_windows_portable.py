@@ -1,3 +1,4 @@
+import json
 import re
 import tempfile
 import unittest
@@ -45,6 +46,42 @@ class PackageWindowsPortableTests(unittest.TestCase):
                         MODULE.installer_to_portable_name(installer_name),
                         expected_name,
                     )
+
+    def test_installer_to_portable_name_treats_malformed_legacy_nightly_as_non_nightly(
+        self,
+    ):
+        arch_cases = [
+            ("x64", "amd64"),
+            ("amd64", "amd64"),
+            ("arm64", "arm64"),
+            ("aarch64", "arm64"),
+        ]
+        separators = [".", "_", "-"]
+        malformed_fragments = [
+            ("nightly{sep}20260401{sep}deadbee", "short_sha"),
+            ("nightly{sep}20261301{sep}deadbeef", "invalid_date"),
+            ("nightly{sep}20260401", "missing_sha"),
+        ]
+
+        for arch_input, arch_output in arch_cases:
+            for separator in separators:
+                for fragment_template, case_name in malformed_fragments:
+                    fragment = fragment_template.format(sep=separator)
+                    with self.subTest(
+                        arch=arch_input,
+                        separator=separator,
+                        malformed_case=case_name,
+                    ):
+                        installer_name = (
+                            f"AstrBot_4.29.0-{fragment}_{arch_input}-setup.exe"
+                        )
+                        expected_name = (
+                            f"AstrBot_4.29.0_windows_{arch_output}_portable.zip"
+                        )
+                        self.assertEqual(
+                            MODULE.installer_to_portable_name(installer_name),
+                            expected_name,
+                        )
 
     def test_installer_to_portable_name_rejects_noncanonical_nightly_suffix_length(
         self,
@@ -150,6 +187,77 @@ class PackageWindowsPortableTests(unittest.TestCase):
     def test_load_project_config_from_rejects_product_name_with_invalid_windows_chars(
         self,
     ):
+        invalid_product_names = [
+            "AstrBot<Dev>",
+            "AstrBot>Dev",
+            'AstrBot:"Test"',
+            "AstrBot/Dev",
+            r"AstrBot\Dev",
+            "AstrBot|Beta",
+            "AstrBot?",
+            "AstrBot*",
+        ]
+
+        for product_name in invalid_product_names:
+            with self.subTest(product_name=product_name):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    project_root = Path(tmpdir)
+                    script_path = (
+                        project_root / "scripts" / "ci" / "package_windows_portable.py"
+                    )
+                    tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+                    cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+                    marker_path = (
+                        project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+                    )
+
+                    script_path.parent.mkdir(parents=True)
+                    script_path.write_text("# placeholder")
+                    tauri_config_path.parent.mkdir(parents=True)
+                    tauri_config_path.write_text(
+                        json.dumps({"productName": product_name})
+                    )
+                    cargo_toml_path.write_text(
+                        '[package]\nname = "astrbot-desktop-tauri"\n'
+                    )
+                    marker_path.parent.mkdir(parents=True, exist_ok=True)
+                    marker_path.write_text("portable.flag\n")
+
+                    with self.assertRaisesRegex(ValueError, "invalid Windows filename"):
+                        MODULE.load_project_config_from(script_path)
+
+    def test_load_project_config_from_rejects_reserved_windows_device_names(self):
+        reserved_product_names = ["CON", "NUL", "PRN", "COM1", "LPT9"]
+
+        for product_name in reserved_product_names:
+            with self.subTest(product_name=product_name):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    project_root = Path(tmpdir)
+                    script_path = (
+                        project_root / "scripts" / "ci" / "package_windows_portable.py"
+                    )
+                    tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+                    cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
+                    marker_path = (
+                        project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+                    )
+
+                    script_path.parent.mkdir(parents=True)
+                    script_path.write_text("# placeholder")
+                    tauri_config_path.parent.mkdir(parents=True)
+                    tauri_config_path.write_text(
+                        json.dumps({"productName": product_name})
+                    )
+                    cargo_toml_path.write_text(
+                        '[package]\nname = "astrbot-desktop-tauri"\n'
+                    )
+                    marker_path.parent.mkdir(parents=True, exist_ok=True)
+                    marker_path.write_text("portable.flag\n")
+
+                    with self.assertRaisesRegex(ValueError, "reserved device name"):
+                        MODULE.load_project_config_from(script_path)
+
+    def test_load_project_config_from_rejects_product_name_with_trailing_dot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
             script_path = (
@@ -162,12 +270,12 @@ class PackageWindowsPortableTests(unittest.TestCase):
             script_path.parent.mkdir(parents=True)
             script_path.write_text("# placeholder")
             tauri_config_path.parent.mkdir(parents=True)
-            tauri_config_path.write_text('{"productName":"AstrBot:Beta"}')
+            tauri_config_path.write_text(json.dumps({"productName": "AstrBot."}))
             cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text("portable.flag\n")
 
-            with self.assertRaisesRegex(ValueError, "invalid Windows filename"):
+            with self.assertRaisesRegex(ValueError, "trailing spaces or dots"):
                 MODULE.load_project_config_from(script_path)
 
     def test_load_project_config_from_strips_exe_suffix_from_product_name(self):
