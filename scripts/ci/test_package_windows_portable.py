@@ -38,60 +38,90 @@ class PackageWindowsPortableTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected Windows installer name"):
             MODULE.installer_to_portable_name("AstrBot-setup.exe")
 
-    def test_find_nsis_payload_archive_prefers_app_prefixed_archives(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plugin_dir = root / "$PLUGINSDIR"
-            plugin_dir.mkdir()
-            fallback_archive = root / "payload.7z"
-            preferred_archive = plugin_dir / "app-64.7z"
-            fallback_archive.write_text("fallback")
-            preferred_archive.write_text("preferred")
+    def test_resolve_release_dir_uses_bundle_parent(self):
+        bundle_dir = Path(
+            "/tmp/project/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis"
+        )
 
-            self.assertEqual(
-                MODULE.find_nsis_payload_archive(root),
-                preferred_archive,
+        self.assertEqual(
+            MODULE.resolve_release_dir(bundle_dir),
+            Path("/tmp/project/src-tauri/target/aarch64-pc-windows-msvc/release"),
+        )
+
+    def test_populate_portable_root_copies_release_bundle_contents(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            bundle_dir = (
+                project_root / "src-tauri" / "target" / "release" / "bundle" / "nsis"
+            )
+            release_dir = project_root / "src-tauri" / "target" / "release"
+            destination_root = project_root / "portable"
+            backend_dir = project_root / "resources" / "backend"
+            webui_dir = project_root / "resources" / "webui"
+            windows_dir = project_root / "src-tauri" / "windows"
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+
+            bundle_dir.mkdir(parents=True)
+            release_dir.mkdir(parents=True, exist_ok=True)
+            backend_dir.mkdir(parents=True)
+            webui_dir.mkdir(parents=True)
+            windows_dir.mkdir(parents=True)
+
+            tauri_config_path.write_text('{"productName":"AstrBot"}')
+            (release_dir / "AstrBot.exe").write_text("exe")
+            (release_dir / "WebView2Loader.dll").write_text("dll")
+            (backend_dir / "runtime-manifest.json").write_text("{}")
+            (backend_dir / "launch_backend.py").write_text("print('ok')")
+            (webui_dir / "index.html").write_text("<html></html>")
+            (windows_dir / "kill-backend-processes.ps1").write_text(
+                "Write-Host cleanup"
             )
 
-    def test_find_nsis_payload_archive_rejects_missing_archives(self):
+            MODULE.populate_portable_root(
+                bundle_dir=bundle_dir,
+                destination_root=destination_root,
+                project_root=project_root,
+            )
+
+            self.assertTrue((destination_root / "AstrBot.exe").is_file())
+            self.assertTrue((destination_root / "WebView2Loader.dll").is_file())
+            self.assertTrue(
+                (
+                    destination_root / "resources" / "backend" / "runtime-manifest.json"
+                ).is_file()
+            )
+            self.assertTrue(
+                (destination_root / "resources" / "webui" / "index.html").is_file()
+            )
+            self.assertTrue((destination_root / "kill-backend-processes.ps1").is_file())
+            self.assertTrue((destination_root / MODULE.PORTABLE_MARKER_NAME).is_file())
+            self.assertTrue((destination_root / MODULE.PORTABLE_README_NAME).is_file())
+
+    def test_populate_portable_root_rejects_missing_main_executable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
+            project_root = Path(tmpdir)
+            bundle_dir = (
+                project_root / "src-tauri" / "target" / "release" / "bundle" / "nsis"
+            )
+            destination_root = project_root / "portable"
+            backend_dir = project_root / "resources" / "backend"
+            webui_dir = project_root / "resources" / "webui"
+            tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
 
-            with self.assertRaisesRegex(FileNotFoundError, "embedded .7z payload"):
-                MODULE.find_nsis_payload_archive(root)
+            bundle_dir.mkdir(parents=True)
+            backend_dir.mkdir(parents=True)
+            webui_dir.mkdir(parents=True)
+            tauri_config_path.parent.mkdir(parents=True, exist_ok=True)
+            tauri_config_path.write_text('{"productName":"AstrBot"}')
+            (backend_dir / "runtime-manifest.json").write_text("{}")
+            (webui_dir / "index.html").write_text("<html></html>")
 
-    def test_find_nsis_payload_archive_rejects_multiple_preferred_archives(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            plugin_dir = root / "$PLUGINSDIR"
-            plugin_dir.mkdir()
-            (plugin_dir / "app-64.7z").write_text("x64")
-            (plugin_dir / "app-32.7z").write_text("x86")
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Expected exactly one NSIS payload archive"
-            ):
-                MODULE.find_nsis_payload_archive(root)
-
-    def test_find_nsis_payload_archive_rejects_multiple_fallback_archives(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "payload-a.7z").write_text("a")
-            (root / "payload-b.7z").write_text("b")
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Expected exactly one NSIS payload archive"
-            ):
-                MODULE.find_nsis_payload_archive(root)
-
-    def test_select_payload_root_collapses_single_top_level_directory(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            portable_root = root / "AstrBot"
-            portable_root.mkdir()
-            (portable_root / "AstrBot.exe").write_text("binary")
-
-            self.assertEqual(MODULE.select_payload_root(root), portable_root)
+            with self.assertRaisesRegex(FileNotFoundError, "Main executable not found"):
+                MODULE.populate_portable_root(
+                    bundle_dir=bundle_dir,
+                    destination_root=destination_root,
+                    project_root=project_root,
+                )
 
     def test_add_portable_runtime_files_writes_marker_and_readme(self):
         with tempfile.TemporaryDirectory() as tmpdir:

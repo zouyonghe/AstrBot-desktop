@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import os
+import json
 import pathlib
 import re
 import shutil
-import subprocess
 import tempfile
 from typing import Iterable
 
@@ -32,10 +31,20 @@ PORTABLE_README_TEXT = """AstrBot Windows portable package
 - Download a newer portable zip from the GitHub release page and apply manual updates by replacing this folder.
 - Microsoft Edge WebView2 Runtime must already be installed on this Windows machine.
 """
+TAURI_CONFIG_RELATIVE_PATH = pathlib.Path("src-tauri") / "tauri.conf.json"
+BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
+WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
+WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
+    pathlib.Path("src-tauri") / "windows" / "kill-backend-processes.ps1"
+)
 
 
 def normalize_arch(arch: str) -> str:
     return normalize_arch_alias(arch) or arch
+
+
+def resolve_project_root() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parents[2]
 
 
 def installer_to_portable_name(installer_name: str) -> str:
@@ -62,79 +71,83 @@ def installer_to_portable_name(installer_name: str) -> str:
     )
 
 
-def find_nsis_payload_archive(extracted_installer_root: pathlib.Path) -> pathlib.Path:
-    archives = sorted(
-        path for path in extracted_installer_root.rglob("*.7z") if path.is_file()
-    )
-    if not archives:
-        raise FileNotFoundError(
-            f"No embedded .7z payload archive found under {extracted_installer_root}"
-        )
-
-    preferred = [path for path in archives if path.name.lower().startswith("app-")]
-    candidates = preferred or archives
-    if len(candidates) != 1:
-        raise RuntimeError(
-            "Expected exactly one NSIS payload archive, found: "
-            + ", ".join(path.name for path in candidates)
-        )
-    return candidates[0]
+def load_tauri_config(project_root: pathlib.Path) -> dict:
+    config_path = project_root / TAURI_CONFIG_RELATIVE_PATH
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Tauri config not found: {config_path}")
+    return json.loads(config_path.read_text(encoding="utf-8"))
 
 
-def select_payload_root(extracted_payload_root: pathlib.Path) -> pathlib.Path:
-    children = sorted(extracted_payload_root.iterdir())
-    if len(children) == 1 and children[0].is_dir():
-        return children[0]
-    return extracted_payload_root
+def resolve_product_name(project_root: pathlib.Path) -> str:
+    config = load_tauri_config(project_root)
+    product_name = str(config.get("productName", "")).strip()
+    if not product_name:
+        raise ValueError(f"Missing productName in {TAURI_CONFIG_RELATIVE_PATH}")
+    return product_name
 
 
-def resolve_7zip_executable() -> str:
-    explicit = os.environ.get("SEVEN_ZIP_EXE", "").strip()
-    if explicit:
-        explicit_path = pathlib.Path(explicit)
-        if explicit_path.exists():
-            return str(explicit_path)
-
-    for candidate in ("7z", "7z.exe"):
-        resolved = shutil.which(candidate)
-        if resolved:
-            return resolved
-
-    for candidate in (
-        pathlib.Path("C:/Program Files/7-Zip/7z.exe"),
-        pathlib.Path("C:/Program Files (x86)/7-Zip/7z.exe"),
-    ):
-        if candidate.exists():
-            return str(candidate)
-
-    raise FileNotFoundError(
-        "Unable to locate 7z. Set SEVEN_ZIP_EXE or ensure 7-Zip is installed on PATH."
-    )
+def resolve_release_dir(bundle_dir: pathlib.Path) -> pathlib.Path:
+    return bundle_dir.parent.parent
 
 
-def extract_archive(
-    archive_path: pathlib.Path, output_dir: pathlib.Path, seven_zip: str
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [seven_zip, "x", "-y", f"-o{output_dir}", str(archive_path)],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+def resolve_main_executable_path(
+    bundle_dir: pathlib.Path, project_root: pathlib.Path
+) -> pathlib.Path:
+    release_dir = resolve_release_dir(bundle_dir)
+    main_executable_path = release_dir / f"{resolve_product_name(project_root)}.exe"
+    if not main_executable_path.is_file():
+        raise FileNotFoundError(f"Main executable not found: {main_executable_path}")
+    return main_executable_path
 
 
-def copy_tree_contents(
+def copy_required_directory(
     source_root: pathlib.Path, destination_root: pathlib.Path
 ) -> None:
+    if not source_root.is_dir():
+        raise FileNotFoundError(f"Required directory not found: {source_root}")
+    shutil.copytree(source_root, destination_root)
+
+
+def copy_optional_file(
+    source_path: pathlib.Path, destination_path: pathlib.Path
+) -> None:
+    if source_path.is_file():
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+
+
+def populate_portable_root(
+    bundle_dir: pathlib.Path,
+    destination_root: pathlib.Path,
+    project_root: pathlib.Path,
+) -> None:
+    release_dir = resolve_release_dir(bundle_dir)
+    main_executable_path = resolve_main_executable_path(bundle_dir, project_root)
+
     destination_root.mkdir(parents=True, exist_ok=True)
-    for child in source_root.iterdir():
-        target = destination_root / child.name
-        if child.is_dir():
-            shutil.copytree(child, target)
-        else:
-            shutil.copy2(child, target)
+    shutil.copy2(main_executable_path, destination_root / main_executable_path.name)
+
+    copy_optional_file(
+        release_dir / "WebView2Loader.dll",
+        destination_root / "WebView2Loader.dll",
+    )
+    copy_optional_file(
+        project_root / WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH,
+        destination_root / "kill-backend-processes.ps1",
+    )
+
+    resources_root = destination_root / "resources"
+    copy_required_directory(
+        project_root / BACKEND_RESOURCE_RELATIVE_PATH,
+        resources_root / "backend",
+    )
+    copy_required_directory(
+        project_root / WEBUI_RESOURCE_RELATIVE_PATH,
+        resources_root / "webui",
+    )
+
+    add_portable_runtime_files(destination_root)
+    validate_portable_root(destination_root)
 
 
 def add_portable_runtime_files(destination_root: pathlib.Path) -> None:
@@ -170,25 +183,21 @@ def iter_installer_paths(bundle_dir: pathlib.Path) -> Iterable[pathlib.Path]:
 
 
 def package_installer(
-    installer_path: pathlib.Path, output_dir: pathlib.Path, seven_zip: str
+    installer_path: pathlib.Path, output_dir: pathlib.Path, project_root: pathlib.Path
 ) -> pathlib.Path:
     portable_name = installer_to_portable_name(installer_path.name)
     portable_stem = portable_name[: -len(".zip")]
 
     with tempfile.TemporaryDirectory(prefix="astrbot-portable-") as tmpdir:
         temp_root = pathlib.Path(tmpdir)
-        extracted_installer_root = temp_root / "installer"
-        extracted_payload_root = temp_root / "payload"
         staging_root = temp_root / "staging"
         archive_root = staging_root / portable_stem
 
-        extract_archive(installer_path, extracted_installer_root, seven_zip)
-        payload_archive = find_nsis_payload_archive(extracted_installer_root)
-        extract_archive(payload_archive, extracted_payload_root, seven_zip)
-        source_root = select_payload_root(extracted_payload_root)
-        copy_tree_contents(source_root, archive_root)
-        add_portable_runtime_files(archive_root)
-        validate_portable_root(archive_root)
+        populate_portable_root(
+            bundle_dir=installer_path.parent,
+            destination_root=archive_root,
+            project_root=project_root,
+        )
 
         output_dir.mkdir(parents=True, exist_ok=True)
         archive_base = output_dir / portable_stem
@@ -207,7 +216,7 @@ def package_installer(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build portable zip artifacts from Windows NSIS installers."
+        description="Build portable zip artifacts from Windows desktop release outputs."
     )
     parser.add_argument(
         "--bundle-dir",
@@ -235,9 +244,9 @@ def main() -> int:
     if not installer_paths:
         raise SystemExit(f"No Windows installer executables found under: {bundle_dir}")
 
-    seven_zip = resolve_7zip_executable()
+    project_root = resolve_project_root()
     for installer_path in installer_paths:
-        archive_path = package_installer(installer_path, output_dir, seven_zip)
+        archive_path = package_installer(installer_path, output_dir, project_root)
         print(f"[windows-portable] created: {archive_path.name}")
 
     return 0
