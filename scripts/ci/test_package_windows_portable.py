@@ -184,6 +184,28 @@ class PackageWindowsPortableTests(unittest.TestCase):
             self.assertEqual(project_config.binary_name, "astrbot-desktop-tauri")
             self.assertEqual(project_config.portable_marker_name, "portable.flag")
 
+    def test_normalize_legacy_nightly_version_returns_base_version_and_suffix(self):
+        self.assertEqual(
+            MODULE.normalize_legacy_nightly_version("4.29.0-nightly.20260401.deadbeef"),
+            ("4.29.0", "_nightly_deadbeef"),
+        )
+
+    def test_normalize_legacy_nightly_version_strips_malformed_nightly_suffix(self):
+        self.assertEqual(
+            MODULE.normalize_legacy_nightly_version("4.29.0-nightly-20260401"),
+            ("4.29.0", ""),
+        )
+
+    def test_portable_executable_name_uses_normalized_product_name(self):
+        project_config = MODULE.ProjectConfig(
+            root=Path("/tmp/project"),
+            product_name="AstrBot",
+            binary_name="astrbot-desktop-tauri",
+            portable_marker_name="portable.flag",
+        )
+
+        self.assertEqual(MODULE.portable_executable_name(project_config), "AstrBot.exe")
+
     def test_load_project_config_from_rejects_product_name_with_invalid_windows_chars(
         self,
     ):

@@ -15,6 +15,7 @@ from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
 from scripts.ci.lib.release_artifacts import SHORT_SHA_PATTERN
+from scripts.ci.lib.windows_filenames import validate_windows_filename
 
 
 WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
@@ -49,16 +50,6 @@ WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
 PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "portable-runtime-marker.txt"
 )
-WINDOWS_FILENAME_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
-WINDOWS_FILENAME_INVALID_TRAILING_RE = re.compile(r"[ .]+$")
-WINDOWS_RESERVED_DEVICE_NAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *{f"COM{i}" for i in range(1, 10)},
-    *{f"LPT{i}" for i in range(1, 10)},
-}
 
 
 @dataclass(frozen=True)
@@ -79,27 +70,6 @@ def is_valid_nightly_date(date_value: str) -> bool:
     except ValueError:
         return False
     return True
-
-
-def validate_windows_filename(name: str) -> None:
-    if not name or name in {".", ".."}:
-        raise ValueError(f"invalid Windows filename: {name!r}")
-
-    if WINDOWS_FILENAME_INVALID_CHARS_RE.search(name):
-        raise ValueError(
-            f"invalid Windows filename {name!r}: contains characters invalid in Windows filenames"
-        )
-
-    if WINDOWS_FILENAME_INVALID_TRAILING_RE.search(name):
-        raise ValueError(
-            f"invalid Windows filename {name!r}: trailing spaces or dots are not allowed"
-        )
-
-    stem = name.split(".", 1)[0].upper()
-    if stem in WINDOWS_RESERVED_DEVICE_NAMES:
-        raise ValueError(
-            f"invalid Windows filename {name!r}: {stem!r} is a reserved device name"
-        )
 
 
 def resolve_project_root_from(start_path: pathlib.Path) -> pathlib.Path:
@@ -148,6 +118,24 @@ def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
     )
 
 
+def normalize_legacy_nightly_version(version: str) -> tuple[str, str]:
+    nightly_match = LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
+    if nightly_match and is_valid_nightly_date(nightly_match.group("date")):
+        base_version = nightly_match.group("version")
+        nightly_suffix = f"_nightly_{nightly_match.group('sha')}"
+        return base_version, nightly_suffix
+
+    malformed_nightly_match = MALFORMED_LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
+    if malformed_nightly_match:
+        return malformed_nightly_match.group("version"), ""
+
+    return version, ""
+
+
+def portable_executable_name(project_config: ProjectConfig) -> str:
+    return f"{project_config.product_name}.exe"
+
+
 def load_project_config() -> ProjectConfig:
     return load_project_config_from(pathlib.Path(__file__))
 
@@ -164,19 +152,10 @@ def installer_to_portable_name(installer_name: str) -> str:
     legacy_match = WINDOWS_LEGACY_INSTALLER_RE.fullmatch(installer_name)
     if legacy_match:
         name = legacy_match.group("name")
-        version = legacy_match.group("version")
+        version, nightly_suffix = normalize_legacy_nightly_version(
+            legacy_match.group("version")
+        )
         arch = normalize_arch(legacy_match.group("arch"))
-        nightly_suffix = ""
-        nightly_match = LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
-        if nightly_match and is_valid_nightly_date(nightly_match.group("date")):
-            version = nightly_match.group("version")
-            nightly_suffix = f"_nightly_{nightly_match.group('sha')}"
-        else:
-            malformed_nightly_match = MALFORMED_LEGACY_NIGHTLY_VERSION_RE.fullmatch(
-                version
-            )
-            if malformed_nightly_match:
-                version = malformed_nightly_match.group("version")
         return f"{name}_{version}_windows_{arch}_portable{nightly_suffix}.zip"
 
     raise ValueError(
@@ -268,10 +247,12 @@ def populate_portable_root(
 ) -> None:
     release_dir = resolve_release_dir(bundle_dir)
     main_executable_path = resolve_main_executable_path(bundle_dir, project_config)
-    portable_executable_name = f"{project_config.product_name}.exe"
 
     destination_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(main_executable_path, destination_root / portable_executable_name)
+    shutil.copy2(
+        main_executable_path,
+        destination_root / portable_executable_name(project_config),
+    )
 
     webview_loader = release_dir / "WebView2Loader.dll"
     if webview_loader.is_file():
