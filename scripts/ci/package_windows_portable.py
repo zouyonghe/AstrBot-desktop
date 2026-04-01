@@ -91,7 +91,7 @@ def load_portable_runtime_marker(project_root: pathlib.Path) -> str:
 def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
     project_root = resolve_project_root_from(start_path)
     product_name = resolve_product_name(project_root)
-    binary_name = load_cargo_package_name(project_root)
+    binary_name = load_binary_name_from_cargo(project_root)
     portable_marker_name = load_portable_runtime_marker(project_root)
     return ProjectConfig(
         root=project_root,
@@ -147,7 +147,7 @@ def load_tauri_config(project_root: pathlib.Path) -> dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
-def load_cargo_package_name(project_root: pathlib.Path) -> str:
+def load_binary_name_from_cargo(project_root: pathlib.Path) -> str:
     cargo_toml_path = project_root / CARGO_TOML_RELATIVE_PATH
     if not cargo_toml_path.is_file():
         raise FileNotFoundError(f"Cargo.toml not found: {cargo_toml_path}")
@@ -165,11 +165,11 @@ def load_cargo_package_name(project_root: pathlib.Path) -> str:
 
     package_table = cargo_data.get("package")
     if not isinstance(package_table, dict):
-        raise ValueError(f"Missing [package] in {CARGO_TOML_RELATIVE_PATH}")
+        raise ValueError(f"Missing [package] in {cargo_toml_path}")
 
     binary_name = str(package_table.get("name", "")).strip()
     if not binary_name:
-        raise ValueError(f"Missing [package].name in {CARGO_TOML_RELATIVE_PATH}")
+        raise ValueError(f"Missing [package].name in {cargo_toml_path}")
 
     return binary_name
 

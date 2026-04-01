@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -137,16 +138,19 @@ class PackageWindowsPortableTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                MODULE.load_cargo_package_name(project_root),
+                MODULE.load_binary_name_from_cargo(project_root),
                 "astrbot-desktop-tauri",
             )
 
     def test_load_cargo_package_name_missing_cargo_toml_raises_file_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
 
-            with self.assertRaises(FileNotFoundError):
-                MODULE.load_cargo_package_name(project_root)
+            with self.assertRaisesRegex(
+                FileNotFoundError, re.escape(str(cargo_toml_path))
+            ):
+                MODULE.load_binary_name_from_cargo(project_root)
 
     def test_load_cargo_package_name_missing_package_table_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -155,8 +159,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
             cargo_toml_path.parent.mkdir(parents=True)
             cargo_toml_path.write_text('[workspace]\nmembers = ["crates/*"]\n')
 
-            with self.assertRaises(ValueError):
-                MODULE.load_cargo_package_name(project_root)
+            with self.assertRaisesRegex(ValueError, re.escape(str(cargo_toml_path))):
+                MODULE.load_binary_name_from_cargo(project_root)
 
     def test_load_cargo_package_name_missing_package_name_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -165,8 +169,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
             cargo_toml_path.parent.mkdir(parents=True)
             cargo_toml_path.write_text('[package]\nversion = "0.1.0"\n')
 
-            with self.assertRaises(ValueError):
-                MODULE.load_cargo_package_name(project_root)
+            with self.assertRaisesRegex(ValueError, re.escape(str(cargo_toml_path))):
+                MODULE.load_binary_name_from_cargo(project_root)
 
     def test_load_cargo_package_name_empty_package_name_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -175,8 +179,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
             cargo_toml_path.parent.mkdir(parents=True)
             cargo_toml_path.write_text('[package]\nname = ""\n')
 
-            with self.assertRaises(ValueError):
-                MODULE.load_cargo_package_name(project_root)
+            with self.assertRaisesRegex(ValueError, re.escape(str(cargo_toml_path))):
+                MODULE.load_binary_name_from_cargo(project_root)
 
     def test_load_cargo_package_name_falls_back_to_package_when_bin_missing_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -191,7 +195,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                MODULE.load_cargo_package_name(project_root),
+                MODULE.load_binary_name_from_cargo(project_root),
                 "astrbot-desktop-tauri",
             )
 
@@ -207,7 +211,9 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 'name = "AstrBot"\n'
             )
 
-            self.assertEqual(MODULE.load_cargo_package_name(project_root), "AstrBot")
+            self.assertEqual(
+                MODULE.load_binary_name_from_cargo(project_root), "AstrBot"
+            )
 
     def test_resolve_main_executable_path_uses_binary_name_not_product_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
