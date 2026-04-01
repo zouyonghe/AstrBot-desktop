@@ -9,6 +9,7 @@ import pathlib
 import re
 import shutil
 import tempfile
+import tomllib
 from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
@@ -31,6 +32,7 @@ PORTABLE_README_TEXT = """AstrBot Windows portable package
 - Microsoft Edge WebView2 Runtime must already be installed on this Windows machine.
 """
 TAURI_CONFIG_RELATIVE_PATH = pathlib.Path("src-tauri") / "tauri.conf.json"
+CARGO_TOML_RELATIVE_PATH = pathlib.Path("src-tauri") / "Cargo.toml"
 BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
 WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
 WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
@@ -45,6 +47,7 @@ PORTABLE_RUNTIME_MARKER_RELATIVE_PATH = (
 class ProjectConfig:
     root: pathlib.Path
     product_name: str
+    binary_name: str
     portable_marker_name: str
 
 
@@ -88,10 +91,12 @@ def load_portable_runtime_marker(project_root: pathlib.Path) -> str:
 def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
     project_root = resolve_project_root_from(start_path)
     product_name = resolve_product_name(project_root)
+    binary_name = load_binary_name_from_cargo(project_root)
     portable_marker_name = load_portable_runtime_marker(project_root)
     return ProjectConfig(
         root=project_root,
         product_name=product_name,
+        binary_name=binary_name,
         portable_marker_name=portable_marker_name,
     )
 
@@ -142,6 +147,33 @@ def load_tauri_config(project_root: pathlib.Path) -> dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
+def load_binary_name_from_cargo(project_root: pathlib.Path) -> str:
+    cargo_toml_path = project_root / CARGO_TOML_RELATIVE_PATH
+    if not cargo_toml_path.is_file():
+        raise FileNotFoundError(f"Cargo.toml not found: {cargo_toml_path}")
+
+    with cargo_toml_path.open("rb") as handle:
+        cargo_data = tomllib.load(handle)
+
+    bins = cargo_data.get("bin")
+    if isinstance(bins, list):
+        for entry in bins:
+            if isinstance(entry, dict):
+                binary_name = str(entry.get("name", "")).strip()
+                if binary_name:
+                    return binary_name
+
+    package_table = cargo_data.get("package")
+    if not isinstance(package_table, dict):
+        raise ValueError(f"Missing [package] in {cargo_toml_path}")
+
+    binary_name = str(package_table.get("name", "")).strip()
+    if not binary_name:
+        raise ValueError(f"Missing [package].name in {cargo_toml_path}")
+
+    return binary_name
+
+
 def resolve_product_name(project_root: pathlib.Path) -> str:
     config = load_tauri_config(project_root)
     product_name = str(config.get("productName", "")).strip()
@@ -158,7 +190,7 @@ def resolve_main_executable_path(
     bundle_dir: pathlib.Path, project_config: ProjectConfig
 ) -> pathlib.Path:
     release_dir = resolve_release_dir(bundle_dir)
-    main_executable_path = release_dir / f"{project_config.product_name}.exe"
+    main_executable_path = release_dir / f"{project_config.binary_name}.exe"
     if not main_executable_path.is_file():
         raise FileNotFoundError(f"Main executable not found: {main_executable_path}")
     return main_executable_path
