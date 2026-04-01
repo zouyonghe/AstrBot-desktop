@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import pathlib
 import re
@@ -14,6 +15,7 @@ from typing import Iterable
 
 from scripts.ci.lib.artifact_arch import normalize_arch_alias
 from scripts.ci.lib.release_artifacts import SHORT_SHA_PATTERN
+from scripts.ci.lib.windows_filenames import validate_windows_filename
 
 
 WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
@@ -23,6 +25,7 @@ WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
 WINDOWS_LEGACY_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64|aarch64)-setup\.exe$"
 )
+LEGACY_NIGHTLY_BASE_VERSION_RE = re.compile(r"^[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*$")
 
 PORTABLE_README_NAME = "README-portable.txt"
 PORTABLE_README_TEXT = """AstrBot Windows portable package
@@ -53,6 +56,14 @@ class ProjectConfig:
 
 def normalize_arch(arch: str) -> str:
     return normalize_arch_alias(arch) or arch
+
+
+def is_valid_nightly_date(date_value: str) -> bool:
+    try:
+        datetime.strptime(date_value, "%Y%m%d")
+    except ValueError:
+        return False
+    return True
 
 
 def resolve_project_root_from(start_path: pathlib.Path) -> pathlib.Path:
@@ -101,6 +112,31 @@ def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
     )
 
 
+def normalize_legacy_nightly_version(version: str) -> tuple[str, str]:
+    if "-nightly" not in version:
+        return version, ""
+
+    base_version, separator, nightly_part = version.partition("-nightly")
+    if not separator or not LEGACY_NIGHTLY_BASE_VERSION_RE.fullmatch(base_version):
+        return version, ""
+
+    nightly_part = nightly_part.lstrip("._-")
+    if not nightly_part:
+        return base_version, ""
+
+    parts = re.split(r"[._-]", nightly_part, maxsplit=2)
+    if len(parts) != 2:
+        return base_version, ""
+
+    date_value, sha = parts[0], parts[1]
+    if not is_valid_nightly_date(date_value):
+        return base_version, ""
+    if not re.fullmatch(SHORT_SHA_PATTERN, sha):
+        return base_version, ""
+
+    return base_version, f"_nightly_{sha}"
+
+
 def load_project_config() -> ProjectConfig:
     return load_project_config_from(pathlib.Path(__file__))
 
@@ -117,9 +153,11 @@ def installer_to_portable_name(installer_name: str) -> str:
     legacy_match = WINDOWS_LEGACY_INSTALLER_RE.fullmatch(installer_name)
     if legacy_match:
         name = legacy_match.group("name")
-        version = legacy_match.group("version")
+        version, nightly_suffix = normalize_legacy_nightly_version(
+            legacy_match.group("version")
+        )
         arch = normalize_arch(legacy_match.group("arch"))
-        return f"{name}_{version}_windows_{arch}_portable.zip"
+        return f"{name}_{version}_windows_{arch}_portable{nightly_suffix}.zip"
 
     raise ValueError(
         "Unexpected Windows installer name: "
@@ -179,6 +217,13 @@ def resolve_product_name(project_root: pathlib.Path) -> str:
     product_name = str(config.get("productName", "")).strip()
     if not product_name:
         raise ValueError(f"Missing productName in {TAURI_CONFIG_RELATIVE_PATH}")
+    if product_name.lower().endswith(".exe"):
+        product_name = product_name[:-4].rstrip()
+    if not product_name:
+        raise ValueError(
+            f"productName resolves to an empty executable name in {TAURI_CONFIG_RELATIVE_PATH}"
+        )
+    validate_windows_filename(product_name)
     return product_name
 
 
@@ -205,7 +250,10 @@ def populate_portable_root(
     main_executable_path = resolve_main_executable_path(bundle_dir, project_config)
 
     destination_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(main_executable_path, destination_root / main_executable_path.name)
+    shutil.copy2(
+        main_executable_path,
+        destination_root / f"{project_config.product_name}.exe",
+    )
 
     webview_loader = release_dir / "WebView2Loader.dll"
     if webview_loader.is_file():
