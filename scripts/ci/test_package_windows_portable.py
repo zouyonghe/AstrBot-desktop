@@ -27,6 +27,14 @@ class PackageWindowsPortableTests(unittest.TestCase):
             "AstrBot_4.29.0_windows_amd64_portable_nightly_deadbeef.zip",
         )
 
+    def test_installer_to_portable_name_normalizes_legacy_nightly_windows_name(self):
+        self.assertEqual(
+            MODULE.installer_to_portable_name(
+                "AstrBot_4.29.0-nightly.20260401.deadbeef_aarch64-setup.exe"
+            ),
+            "AstrBot_4.29.0_windows_arm64_portable_nightly_deadbeef.zip",
+        )
+
     def test_installer_to_portable_name_rejects_noncanonical_nightly_suffix_length(
         self,
     ):
@@ -299,7 +307,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 project_config=MODULE.load_project_config_from(script_path),
             )
 
-            self.assertTrue((destination_root / "astrbot-desktop-tauri.exe").is_file())
+            self.assertTrue((destination_root / "AstrBot.exe").is_file())
+            self.assertFalse((destination_root / "astrbot-desktop-tauri.exe").exists())
             self.assertTrue((destination_root / "WebView2Loader.dll").is_file())
             self.assertTrue(
                 (

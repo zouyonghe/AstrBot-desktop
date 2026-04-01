@@ -23,6 +23,9 @@ WINDOWS_CANONICAL_INSTALLER_RE = re.compile(
 WINDOWS_LEGACY_INSTALLER_RE = re.compile(
     r"(?P<name>.+?)_(?P<version>.+?)_(?P<arch>x64|amd64|arm64|aarch64)-setup\.exe$"
 )
+LEGACY_NIGHTLY_VERSION_RE = re.compile(
+    rf"^(?P<version>.+?)-nightly[._-](?P<date>[0-9]{{8}})[._-](?P<sha>{SHORT_SHA_PATTERN})$"
+)
 
 PORTABLE_README_NAME = "README-portable.txt"
 PORTABLE_README_TEXT = """AstrBot Windows portable package
@@ -119,7 +122,12 @@ def installer_to_portable_name(installer_name: str) -> str:
         name = legacy_match.group("name")
         version = legacy_match.group("version")
         arch = normalize_arch(legacy_match.group("arch"))
-        return f"{name}_{version}_windows_{arch}_portable.zip"
+        nightly_suffix = ""
+        nightly_match = LEGACY_NIGHTLY_VERSION_RE.fullmatch(version)
+        if nightly_match:
+            version = nightly_match.group("version")
+            nightly_suffix = f"_nightly_{nightly_match.group('sha')}"
+        return f"{name}_{version}_windows_{arch}_portable{nightly_suffix}.zip"
 
     raise ValueError(
         "Unexpected Windows installer name: "
@@ -203,9 +211,10 @@ def populate_portable_root(
 ) -> None:
     release_dir = resolve_release_dir(bundle_dir)
     main_executable_path = resolve_main_executable_path(bundle_dir, project_config)
+    portable_executable_name = f"{project_config.product_name}.exe"
 
     destination_root.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(main_executable_path, destination_root / main_executable_path.name)
+    shutil.copy2(main_executable_path, destination_root / portable_executable_name)
 
     webview_loader = release_dir / "WebView2Loader.dll"
     if webview_loader.is_file():
