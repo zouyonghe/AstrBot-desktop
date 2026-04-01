@@ -51,6 +51,17 @@ pub(crate) fn is_windows_portable_runtime() -> bool {
     is_windows_portable_runtime_with_exe_dir(exe_dir.as_deref())
 }
 
+fn windows_portable_runtime_for_target<F>(target_os: &str, detector: F) -> bool
+where
+    F: FnOnce() -> bool,
+{
+    if target_os == "windows" {
+        detector()
+    } else {
+        false
+    }
+}
+
 pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
     let target_os = if cfg!(target_os = "windows") {
         "windows"
@@ -64,7 +75,7 @@ pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
     resolve_desktop_update_mode_for_target(
         target_os,
         is_linux_appimage_runtime(),
-        is_windows_portable_runtime(),
+        windows_portable_runtime_for_target(target_os, is_windows_portable_runtime),
     )
 }
 
@@ -72,6 +83,7 @@ pub(crate) fn resolve_desktop_update_mode() -> DesktopUpdateMode {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
 
     #[test]
@@ -108,5 +120,18 @@ mod tests {
         fs::write(dir.path().join(PORTABLE_RUNTIME_MARKER), b"").expect("write marker");
 
         assert!(is_windows_portable_runtime_with_exe_dir(Some(dir.path())));
+    }
+
+    #[test]
+    fn windows_portable_runtime_for_target_skips_detection_on_non_windows() {
+        let called = AtomicBool::new(false);
+
+        let result = windows_portable_runtime_for_target("linux", || {
+            called.store(true, Ordering::Relaxed);
+            true
+        });
+
+        assert!(!result);
+        assert!(!called.load(Ordering::Relaxed));
     }
 }

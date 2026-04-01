@@ -87,6 +87,17 @@ def installer_to_portable_name(installer_name: str) -> str:
     )
 
 
+def is_installer_executable(path: pathlib.Path) -> bool:
+    if not path.is_file() or path.suffix.lower() != ".exe":
+        return False
+
+    try:
+        installer_to_portable_name(path.name)
+    except ValueError:
+        return False
+    return True
+
+
 def load_tauri_config(project_root: pathlib.Path) -> dict:
     config_path = project_root / TAURI_CONFIG_RELATIVE_PATH
     if not config_path.is_file():
@@ -195,7 +206,9 @@ def validate_portable_root(destination_root: pathlib.Path) -> None:
 
 
 def iter_installer_paths(bundle_dir: pathlib.Path) -> Iterable[pathlib.Path]:
-    return sorted(path for path in bundle_dir.glob("*.exe") if path.is_file())
+    return sorted(
+        path for path in bundle_dir.glob("*.exe") if is_installer_executable(path)
+    )
 
 
 def package_installer(

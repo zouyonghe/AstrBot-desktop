@@ -78,6 +78,23 @@ class PackageWindowsPortableTests(unittest.TestCase):
             ):
                 MODULE.resolve_project_root_from(script_path)
 
+    def test_iter_installer_paths_only_returns_installer_style_executables(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle_dir = Path(tmpdir)
+            canonical = bundle_dir / "AstrBot_4.29.0_windows_amd64_setup.exe"
+            legacy = bundle_dir / "AstrBot_4.29.0_x64-setup.exe"
+            helper = bundle_dir / "helper.exe"
+            updater = bundle_dir / "AstrBot_4.29.0_windows_amd64_updater.exe"
+            canonical.write_text("installer")
+            legacy.write_text("legacy")
+            helper.write_text("helper")
+            updater.write_text("updater")
+
+            self.assertEqual(
+                MODULE.iter_installer_paths(bundle_dir),
+                [canonical, legacy],
+            )
+
     def test_populate_portable_root_copies_release_bundle_contents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
