@@ -109,12 +109,14 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 project_root / "scripts" / "ci" / "package_windows_portable.py"
             )
             tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
             marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
 
             script_path.parent.mkdir(parents=True)
             script_path.write_text("# placeholder")
             tauri_config_path.parent.mkdir(parents=True)
             tauri_config_path.write_text('{"productName":"AstrBot"}')
+            cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text("portable.flag\n")
 
@@ -122,7 +124,31 @@ class PackageWindowsPortableTests(unittest.TestCase):
 
             self.assertEqual(project_config.root, project_root.resolve())
             self.assertEqual(project_config.product_name, "AstrBot")
+            self.assertEqual(project_config.binary_name, "astrbot-desktop-tauri")
             self.assertEqual(project_config.portable_marker_name, "portable.flag")
+
+    def test_resolve_main_executable_path_uses_binary_name_not_product_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            bundle_dir = (
+                project_root / "src-tauri" / "target" / "release" / "bundle" / "nsis"
+            )
+            release_dir = project_root / "src-tauri" / "target" / "release"
+            bundle_dir.mkdir(parents=True)
+            release_dir.mkdir(parents=True, exist_ok=True)
+            (release_dir / "astrbot-desktop-tauri.exe").write_text("exe")
+
+            project_config = MODULE.ProjectConfig(
+                root=project_root,
+                product_name="AstrBot",
+                binary_name="astrbot-desktop-tauri",
+                portable_marker_name="portable.flag",
+            )
+
+            self.assertEqual(
+                MODULE.resolve_main_executable_path(bundle_dir, project_config),
+                release_dir / "astrbot-desktop-tauri.exe",
+            )
 
     def test_iter_installer_paths_only_returns_installer_style_executables(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,6 +182,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             webui_dir = project_root / "resources" / "webui"
             windows_dir = project_root / "src-tauri" / "windows"
             tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
             marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
 
             script_path.parent.mkdir(parents=True)
@@ -167,8 +194,9 @@ class PackageWindowsPortableTests(unittest.TestCase):
             windows_dir.mkdir(parents=True)
 
             tauri_config_path.write_text('{"productName":"AstrBot"}')
+            cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
             marker_path.write_text("portable.flag\n")
-            (release_dir / "AstrBot.exe").write_text("exe")
+            (release_dir / "astrbot-desktop-tauri.exe").write_text("exe")
             (release_dir / "WebView2Loader.dll").write_text("dll")
             (backend_dir / "runtime-manifest.json").write_text("{}")
             (backend_dir / "launch_backend.py").write_text("print('ok')")
@@ -183,7 +211,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 project_config=MODULE.load_project_config_from(script_path),
             )
 
-            self.assertTrue((destination_root / "AstrBot.exe").is_file())
+            self.assertTrue((destination_root / "astrbot-desktop-tauri.exe").is_file())
             self.assertTrue((destination_root / "WebView2Loader.dll").is_file())
             self.assertTrue(
                 (
@@ -210,6 +238,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             backend_dir = project_root / "resources" / "backend"
             webui_dir = project_root / "resources" / "webui"
             tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
+            cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
             marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
 
             script_path.parent.mkdir(parents=True)
@@ -219,6 +248,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             webui_dir.mkdir(parents=True)
             tauri_config_path.parent.mkdir(parents=True, exist_ok=True)
             tauri_config_path.write_text('{"productName":"AstrBot"}')
+            cargo_toml_path.write_text('[package]\nname = "astrbot-desktop-tauri"\n')
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text("portable.flag\n")
             (backend_dir / "runtime-manifest.json").write_text("{}")
@@ -237,6 +267,7 @@ class PackageWindowsPortableTests(unittest.TestCase):
             project_config = MODULE.ProjectConfig(
                 root=Path(tmpdir),
                 product_name="AstrBot",
+                binary_name="astrbot-desktop-tauri",
                 portable_marker_name="portable.flag",
             )
 
