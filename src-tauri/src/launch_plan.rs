@@ -7,6 +7,13 @@ use tauri::AppHandle;
 
 use crate::{packaged_webui, runtime_paths, LaunchPlan, RuntimeManifest};
 
+const BACKEND_RESOURCE_ALIAS: &str = env!("ASTRBOT_BACKEND_RESOURCE_ALIAS");
+const WEBUI_RESOURCE_ALIAS: &str = env!("ASTRBOT_WEBUI_RESOURCE_ALIAS");
+
+fn build_packaged_resource_relative_path(resource_alias: &str, leaf_name: &str) -> PathBuf {
+    PathBuf::from(resource_alias).join(leaf_name)
+}
+
 pub fn resolve_custom_launch(custom_cmd: String) -> Result<LaunchPlan, String> {
     let mut pieces = shlex::split(&custom_cmd)
         .ok_or_else(|| format!("Invalid ASTRBOT_BACKEND_CMD: {custom_cmd}"))?;
@@ -41,8 +48,11 @@ pub fn resolve_packaged_launch<F>(
 where
     F: Fn(&str) + Copy,
 {
+    let manifest_relative_path =
+        build_packaged_resource_relative_path(BACKEND_RESOURCE_ALIAS, "runtime-manifest.json");
+    let manifest_relative_path_string = manifest_relative_path.to_string_lossy().to_string();
     let manifest_path =
-        match runtime_paths::resolve_resource_path(app, "backend/runtime-manifest.json", log) {
+        match runtime_paths::resolve_resource_path(app, &manifest_relative_path_string, log) {
             Some(path) if path.is_file() => path,
             _ => return Ok(None),
         };
@@ -112,7 +122,11 @@ where
         .ok()
         .map(PathBuf::from)
         .or_else(|| {
-            runtime_paths::resolve_resource_path(app, "webui/index.html", log)
+            let webui_index_relative_path =
+                build_packaged_resource_relative_path(WEBUI_RESOURCE_ALIAS, "index.html");
+            let webui_index_relative_path_string =
+                webui_index_relative_path.to_string_lossy().to_string();
+            runtime_paths::resolve_resource_path(app, &webui_index_relative_path_string, log)
                 .and_then(|index_path| index_path.parent().map(Path::to_path_buf))
         });
     let webui_dir = packaged_webui::resolve_packaged_webui_dir(
@@ -171,4 +185,21 @@ pub fn resolve_dev_launch() -> Result<LaunchPlan, String> {
         webui_dir,
         packaged_mode: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_packaged_resource_relative_path_joins_alias_and_leaf_name() {
+        assert_eq!(
+            build_packaged_resource_relative_path("runtime/backend", "runtime-manifest.json"),
+            PathBuf::from("runtime/backend").join("runtime-manifest.json")
+        );
+        assert_eq!(
+            build_packaged_resource_relative_path("runtime/webui", "index.html"),
+            PathBuf::from("runtime/webui").join("index.html")
+        );
+    }
 }

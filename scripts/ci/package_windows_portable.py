@@ -39,9 +39,6 @@ CARGO_TOML_RELATIVE_PATH = pathlib.Path("src-tauri") / "Cargo.toml"
 # These point to the source resource directories inside the repository checkout.
 BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
 WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
-# These are the runtime-visible locations emitted into the portable package root.
-PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH = pathlib.Path("backend")
-PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH = pathlib.Path("webui")
 WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "kill-backend-processes.ps1"
 )
@@ -56,6 +53,8 @@ class ProjectConfig:
     product_name: str
     binary_name: str
     portable_marker_name: str
+    backend_layout_relative_path: pathlib.Path
+    webui_layout_relative_path: pathlib.Path
 
 
 def normalize_arch(arch: str) -> str:
@@ -103,16 +102,70 @@ def load_portable_runtime_marker(project_root: pathlib.Path) -> str:
     return marker_name
 
 
+def resolve_bundle_resource_alias_from_tauri_config(
+    project_root: pathlib.Path,
+    tauri_config: dict,
+    source_relative_path: pathlib.Path,
+) -> pathlib.Path:
+    bundle_table = tauri_config.get("bundle")
+    if not isinstance(bundle_table, dict):
+        raise ValueError(f"Missing bundle table in {TAURI_CONFIG_RELATIVE_PATH}")
+
+    resources_table = bundle_table.get("resources")
+    if not isinstance(resources_table, dict):
+        raise ValueError(
+            f"Missing bundle.resources table in {TAURI_CONFIG_RELATIVE_PATH}"
+        )
+
+    tauri_config_dir = (project_root / TAURI_CONFIG_RELATIVE_PATH).parent.resolve()
+    expected_source_path = (project_root / source_relative_path).resolve()
+    for source_path_text, alias_text in resources_table.items():
+        candidate_source_path = (tauri_config_dir / str(source_path_text)).resolve()
+        if candidate_source_path != expected_source_path:
+            continue
+
+        alias_path = pathlib.Path(str(alias_text).strip())
+        if not alias_path.parts or alias_path.is_absolute():
+            raise ValueError(
+                "Invalid bundle.resources alias for "
+                f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
+            )
+        if any(part in (".", "..") for part in alias_path.parts):
+            raise ValueError(
+                "bundle.resources alias must not contain path traversal for "
+                f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
+            )
+        return alias_path
+
+    raise ValueError(
+        "Missing bundle.resources alias for "
+        f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}"
+    )
+
+
 def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:
     project_root = resolve_project_root_from(start_path)
-    product_name = resolve_product_name(project_root)
+    tauri_config = load_tauri_config(project_root)
+    product_name = resolve_product_name_from_tauri_config(tauri_config)
     binary_name = load_binary_name_from_cargo(project_root)
     portable_marker_name = load_portable_runtime_marker(project_root)
+    backend_layout_relative_path = resolve_bundle_resource_alias_from_tauri_config(
+        project_root,
+        tauri_config,
+        BACKEND_RESOURCE_RELATIVE_PATH,
+    )
+    webui_layout_relative_path = resolve_bundle_resource_alias_from_tauri_config(
+        project_root,
+        tauri_config,
+        WEBUI_RESOURCE_RELATIVE_PATH,
+    )
     return ProjectConfig(
         root=project_root,
         product_name=product_name,
         binary_name=binary_name,
         portable_marker_name=portable_marker_name,
+        backend_layout_relative_path=backend_layout_relative_path,
+        webui_layout_relative_path=webui_layout_relative_path,
     )
 
 
@@ -216,8 +269,7 @@ def load_binary_name_from_cargo(project_root: pathlib.Path) -> str:
     return binary_name
 
 
-def resolve_product_name(project_root: pathlib.Path) -> str:
-    config = load_tauri_config(project_root)
+def resolve_product_name_from_tauri_config(config: dict) -> str:
     product_name = str(config.get("productName", "")).strip()
     if not product_name:
         raise ValueError(f"Missing productName in {TAURI_CONFIG_RELATIVE_PATH}")
@@ -229,6 +281,10 @@ def resolve_product_name(project_root: pathlib.Path) -> str:
         )
     validate_windows_filename(product_name)
     return product_name
+
+
+def resolve_product_name(project_root: pathlib.Path) -> str:
+    return resolve_product_name_from_tauri_config(load_tauri_config(project_root))
 
 
 def resolve_release_dir(bundle_dir: pathlib.Path) -> pathlib.Path:
@@ -270,15 +326,19 @@ def populate_portable_root(
     backend_src = project_config.root / BACKEND_RESOURCE_RELATIVE_PATH
     if not backend_src.is_dir():
         raise FileNotFoundError(f"Required directory not found: {backend_src}")
-    shutil.copytree(backend_src, destination_root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH)
+    shutil.copytree(
+        backend_src, destination_root / project_config.backend_layout_relative_path
+    )
 
     webui_src = project_config.root / WEBUI_RESOURCE_RELATIVE_PATH
     if not webui_src.is_dir():
         raise FileNotFoundError(f"Required directory not found: {webui_src}")
-    shutil.copytree(webui_src, destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH)
+    shutil.copytree(
+        webui_src, destination_root / project_config.webui_layout_relative_path
+    )
 
     add_portable_runtime_files(destination_root, project_config)
-    validate_portable_root(destination_root)
+    validate_portable_root(destination_root, project_config)
 
 
 def add_portable_runtime_files(
@@ -293,10 +353,14 @@ def add_portable_runtime_files(
     )
 
 
-def validate_portable_root(destination_root: pathlib.Path) -> None:
+def validate_portable_root(
+    destination_root: pathlib.Path, project_config: ProjectConfig | None = None
+) -> None:
+    if project_config is None:
+        project_config = load_project_config()
     expected_paths = [
-        destination_root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json",
-        destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html",
+        destination_root / project_config.backend_layout_relative_path / "runtime-manifest.json",
+        destination_root / project_config.webui_layout_relative_path / "index.html",
     ]
     missing = [
         str(path.relative_to(destination_root))

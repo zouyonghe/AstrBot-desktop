@@ -6,9 +6,6 @@ from pathlib import Path
 
 from scripts.ci import package_windows_portable as MODULE
 
-PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH = MODULE.PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH
-PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH = MODULE.PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH
-
 
 class PackageWindowsPortableTests(unittest.TestCase):
     def make_project_layout(
@@ -17,17 +14,30 @@ class PackageWindowsPortableTests(unittest.TestCase):
         product_name: str = "AstrBot",
         cargo_toml: str = '[package]\nname = "astrbot-desktop-tauri"\n',
         marker_name: str = "portable.flag\n",
+        tauri_resources: dict[str, str] | None = None,
     ) -> dict[str, Path]:
         project_root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         script_path = project_root / "scripts" / "ci" / "package_windows_portable.py"
         tauri_config_path = project_root / "src-tauri" / "tauri.conf.json"
         cargo_toml_path = project_root / "src-tauri" / "Cargo.toml"
         marker_path = project_root / MODULE.PORTABLE_RUNTIME_MARKER_RELATIVE_PATH
+        if tauri_resources is None:
+            tauri_resources = {
+                "../resources/backend": "backend",
+                "../resources/webui": "webui",
+            }
 
         script_path.parent.mkdir(parents=True)
         script_path.write_text("# placeholder")
         tauri_config_path.parent.mkdir(parents=True)
-        tauri_config_path.write_text(json.dumps({"productName": product_name}))
+        tauri_config_path.write_text(
+            json.dumps(
+                {
+                    "productName": product_name,
+                    "bundle": {"resources": tauri_resources},
+                }
+            )
+        )
         cargo_toml_path.write_text(cargo_toml)
         marker_path.parent.mkdir(parents=True, exist_ok=True)
         marker_path.write_text(marker_name)
@@ -201,6 +211,27 @@ class PackageWindowsPortableTests(unittest.TestCase):
         self.assertEqual(project_config.product_name, "AstrBot")
         self.assertEqual(project_config.binary_name, "astrbot-desktop-tauri")
         self.assertEqual(project_config.portable_marker_name, "portable.flag")
+        self.assertEqual(project_config.backend_layout_relative_path, Path("backend"))
+        self.assertEqual(project_config.webui_layout_relative_path, Path("webui"))
+
+    def test_load_project_config_from_reads_portable_layout_aliases_from_tauri_resources(
+        self,
+    ):
+        layout = self.make_project_layout(
+            tauri_resources={
+                "../resources/backend": "runtime/backend",
+                "../resources/webui": "runtime/webui",
+            }
+        )
+
+        project_config = MODULE.load_project_config_from(layout["script_path"])
+
+        self.assertEqual(
+            project_config.backend_layout_relative_path, Path("runtime/backend")
+        )
+        self.assertEqual(
+            project_config.webui_layout_relative_path, Path("runtime/webui")
+        )
 
     def test_normalize_legacy_nightly_version_returns_base_version_and_suffix(self):
         self.assertEqual(
@@ -363,6 +394,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 product_name="AstrBot",
                 binary_name="astrbot-desktop-tauri",
                 portable_marker_name="portable.flag",
+                backend_layout_relative_path=Path("backend"),
+                webui_layout_relative_path=Path("webui"),
             )
 
             self.assertEqual(
@@ -428,12 +461,16 @@ class PackageWindowsPortableTests(unittest.TestCase):
         self.assertTrue(
             (
                 destination_root
-                / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH
+                / project_config.backend_layout_relative_path
                 / "runtime-manifest.json"
             ).is_file()
         )
         self.assertTrue(
-            (destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").is_file()
+            (
+                destination_root
+                / project_config.webui_layout_relative_path
+                / "index.html"
+            ).is_file()
         )
         self.assertFalse((destination_root / "resources" / "backend").exists())
         self.assertFalse((destination_root / "resources" / "webui").exists())
@@ -473,6 +510,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
                 product_name="AstrBot",
                 binary_name="astrbot-desktop-tauri",
                 portable_marker_name="portable.flag",
+                backend_layout_relative_path=Path("backend"),
+                webui_layout_relative_path=Path("webui"),
             )
 
             MODULE.add_portable_runtime_files(root, project_config)
@@ -484,42 +523,51 @@ class PackageWindowsPortableTests(unittest.TestCase):
             )
 
     def test_validate_portable_root_accepts_expected_layout(self):
+        layout = self.make_project_layout()
+        project_config = MODULE.load_project_config_from(layout["script_path"])
+
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "AstrBot.exe").write_text("binary")
-            (root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
-            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (root / project_config.backend_layout_relative_path).mkdir(parents=True)
+            (root / project_config.webui_layout_relative_path).mkdir(parents=True)
             (
-                root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json"
+                root / project_config.backend_layout_relative_path / "runtime-manifest.json"
             ).write_text("{}")
-            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").write_text(
+            (root / project_config.webui_layout_relative_path / "index.html").write_text(
                 "<html></html>"
             )
 
-            MODULE.validate_portable_root(root)
+            MODULE.validate_portable_root(root, project_config)
 
     def test_validate_portable_root_requires_expected_files(self):
+        layout = self.make_project_layout()
+        project_config = MODULE.load_project_config_from(layout["script_path"])
+
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "AstrBot.exe").write_text("binary")
 
             with self.assertRaisesRegex(ValueError, "runtime-manifest.json"):
-                MODULE.validate_portable_root(root)
+                MODULE.validate_portable_root(root, project_config)
 
     def test_validate_portable_root_requires_top_level_exe(self):
+        layout = self.make_project_layout()
+        project_config = MODULE.load_project_config_from(layout["script_path"])
+
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
-            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (root / project_config.backend_layout_relative_path).mkdir(parents=True)
+            (root / project_config.webui_layout_relative_path).mkdir(parents=True)
             (
-                root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json"
+                root / project_config.backend_layout_relative_path / "runtime-manifest.json"
             ).write_text("{}")
-            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").write_text(
+            (root / project_config.webui_layout_relative_path / "index.html").write_text(
                 "<html></html>"
             )
 
             with self.assertRaisesRegex(ValueError, r"top-level \*\.exe"):
-                MODULE.validate_portable_root(root)
+                MODULE.validate_portable_root(root, project_config)
 
 
 if __name__ == "__main__":
