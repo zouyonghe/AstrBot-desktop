@@ -6,6 +6,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -107,40 +108,49 @@ def resolve_bundle_resource_alias_from_tauri_config(
     tauri_config: dict,
     source_relative_path: pathlib.Path,
 ) -> pathlib.Path:
+    # Keep validation rules aligned with src-tauri/build.rs::load_bundle_resource_alias.
     bundle_table = tauri_config.get("bundle")
     if not isinstance(bundle_table, dict):
-        raise ValueError(f"Missing bundle table in {TAURI_CONFIG_RELATIVE_PATH}")
+        raise ValueError(f"Missing bundle object in {TAURI_CONFIG_RELATIVE_PATH}")
 
     resources_table = bundle_table.get("resources")
     if not isinstance(resources_table, dict):
         raise ValueError(
-            f"Missing bundle.resources table in {TAURI_CONFIG_RELATIVE_PATH}"
+            f"Missing bundle.resources object in {TAURI_CONFIG_RELATIVE_PATH}"
         )
 
     tauri_config_dir = (project_root / TAURI_CONFIG_RELATIVE_PATH).parent.resolve()
     expected_source_path = (project_root / source_relative_path).resolve()
-    for source_path_text, alias_text in resources_table.items():
-        candidate_source_path = (tauri_config_dir / str(source_path_text)).resolve()
-        if candidate_source_path != expected_source_path:
-            continue
+    expected_source_key = pathlib.PurePosixPath(
+        os.path.relpath(expected_source_path, tauri_config_dir)
+    ).as_posix()
+    alias_text = resources_table.get(expected_source_key)
+    if alias_text is None:
+        raise ValueError(
+            "Missing bundle.resources alias for "
+            f"{expected_source_key} in {TAURI_CONFIG_RELATIVE_PATH}"
+        )
 
-        alias_path = pathlib.Path(str(alias_text).strip())
-        if not alias_path.parts or alias_path.is_absolute():
-            raise ValueError(
-                "Invalid bundle.resources alias for "
-                f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
-            )
-        if any(part in (".", "..") for part in alias_path.parts):
-            raise ValueError(
-                "bundle.resources alias must not contain path traversal for "
-                f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
-            )
-        return alias_path
+    if not isinstance(alias_text, str):
+        raise ValueError(
+            "bundle.resources alias for "
+            f"{expected_source_key} must be a string in {TAURI_CONFIG_RELATIVE_PATH}"
+        )
 
-    raise ValueError(
-        "Missing bundle.resources alias for "
-        f"{source_relative_path} in {TAURI_CONFIG_RELATIVE_PATH}"
-    )
+    alias_path = pathlib.Path(alias_text.strip())
+    if not alias_path.parts or alias_path.is_absolute():
+        raise ValueError(
+            "bundle.resources alias for "
+            f"{expected_source_key} must be a relative path in "
+            f"{TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
+        )
+    if any(part in (".", "..") for part in alias_path.parts):
+        raise ValueError(
+            "bundle.resources alias for "
+            f"{expected_source_key} must be a relative path without traversal in "
+            f"{TAURI_CONFIG_RELATIVE_PATH}: {alias_text}"
+        )
+    return alias_path
 
 
 def load_project_config_from(start_path: pathlib.Path) -> ProjectConfig:

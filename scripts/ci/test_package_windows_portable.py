@@ -233,6 +233,20 @@ class PackageWindowsPortableTests(unittest.TestCase):
             project_config.webui_layout_relative_path, Path("runtime/webui")
         )
 
+    def test_load_project_config_from_requires_exact_tauri_resource_source_keys(self):
+        layout = self.make_project_layout(
+            tauri_resources={
+                "./../resources/backend": "runtime/backend",
+                "../resources/webui": "runtime/webui",
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            re.escape("Missing bundle.resources alias for ../resources/backend"),
+        ):
+            MODULE.load_project_config_from(layout["script_path"])
+
     def test_normalize_legacy_nightly_version_returns_base_version_and_suffix(self):
         self.assertEqual(
             MODULE.normalize_legacy_nightly_version("4.29.0-nightly.20260401.deadbeef"),
@@ -539,6 +553,33 @@ class PackageWindowsPortableTests(unittest.TestCase):
             )
 
             MODULE.validate_portable_root(root, project_config)
+
+    def test_validate_portable_root_accepts_nested_alias_layout(self):
+        layout = self.make_project_layout(
+            tauri_resources={
+                "../resources/backend": "runtime/backend",
+                "../resources/webui": "runtime/webui",
+            }
+        )
+        project_config = MODULE.load_project_config_from(layout["script_path"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "AstrBot.exe").write_text("binary")
+            (root / project_config.portable_marker_name).write_text("marker")
+            (root / project_config.backend_layout_relative_path).mkdir(parents=True)
+            (root / project_config.webui_layout_relative_path).mkdir(parents=True)
+            (
+                root / project_config.backend_layout_relative_path / "runtime-manifest.json"
+            ).write_text("{}")
+            (root / project_config.webui_layout_relative_path / "index.html").write_text(
+                "<html></html>"
+            )
+
+            MODULE.validate_portable_root(root, project_config)
+
+            self.assertFalse((root / "backend").exists())
+            self.assertFalse((root / "webui").exists())
 
     def test_validate_portable_root_requires_expected_files(self):
         layout = self.make_project_layout()

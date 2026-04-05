@@ -9,22 +9,29 @@ const BACKEND_RESOURCE_SOURCE: &str = "../resources/backend";
 const WEBUI_RESOURCE_SOURCE: &str = "../resources/webui";
 
 fn load_bundle_resource_alias(tauri_config: &Value, source_relative_path: &str) -> String {
-    let resources = tauri_config
+    // Keep validation rules aligned with
+    // scripts/ci/package_windows_portable.py::resolve_bundle_resource_alias_from_tauri_config.
+    let bundle = tauri_config
         .get("bundle")
-        .and_then(|bundle| bundle.get("resources"))
         .and_then(Value::as_object)
-        .unwrap_or_else(|| panic!("missing bundle.resources table in {TAURI_CONFIG_PATH}"));
+        .unwrap_or_else(|| panic!("missing bundle object in {TAURI_CONFIG_PATH}"));
+    let resources = bundle
+        .get("resources")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("missing bundle.resources object in {TAURI_CONFIG_PATH}"));
 
-    let alias = resources
-        .get(source_relative_path)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_else(|| {
-            panic!(
-                "missing bundle.resources alias for {} in {}",
-                source_relative_path, TAURI_CONFIG_PATH
-            )
-        });
+    let alias_value = resources.get(source_relative_path).unwrap_or_else(|| {
+        panic!(
+            "missing bundle.resources alias for {} in {}",
+            source_relative_path, TAURI_CONFIG_PATH
+        )
+    });
+    let alias = alias_value.as_str().map(str::trim).unwrap_or_else(|| {
+        panic!(
+            "bundle.resources alias for {} must be a string in {}",
+            source_relative_path, TAURI_CONFIG_PATH
+        )
+    });
     assert!(
         !alias.is_empty(),
         "bundle.resources alias for {} is empty in {}",
