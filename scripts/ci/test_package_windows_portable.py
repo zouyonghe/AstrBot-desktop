@@ -426,6 +426,8 @@ class PackageWindowsPortableTests(unittest.TestCase):
             (destination_root / "backend" / "runtime-manifest.json").is_file()
         )
         self.assertTrue((destination_root / "webui" / "index.html").is_file())
+        self.assertFalse((destination_root / "resources" / "backend").exists())
+        self.assertFalse((destination_root / "resources" / "webui").exists())
         self.assertTrue((destination_root / "kill-backend-processes.ps1").is_file())
         self.assertTrue((destination_root / "portable.flag").is_file())
         self.assertTrue((destination_root / MODULE.PORTABLE_README_NAME).is_file())

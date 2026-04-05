@@ -36,8 +36,10 @@ PORTABLE_README_TEXT = """AstrBot Windows portable package
 """
 TAURI_CONFIG_RELATIVE_PATH = pathlib.Path("src-tauri") / "tauri.conf.json"
 CARGO_TOML_RELATIVE_PATH = pathlib.Path("src-tauri") / "Cargo.toml"
+# These point to the source resource directories inside the repository checkout.
 BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
 WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
+# These are the runtime-visible locations emitted into the portable package root.
 PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH = pathlib.Path("backend")
 PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH = pathlib.Path("webui")
 WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
