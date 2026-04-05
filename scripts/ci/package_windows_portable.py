@@ -38,6 +38,8 @@ TAURI_CONFIG_RELATIVE_PATH = pathlib.Path("src-tauri") / "tauri.conf.json"
 CARGO_TOML_RELATIVE_PATH = pathlib.Path("src-tauri") / "Cargo.toml"
 BACKEND_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "backend"
 WEBUI_RESOURCE_RELATIVE_PATH = pathlib.Path("resources") / "webui"
+PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH = pathlib.Path("backend")
+PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH = pathlib.Path("webui")
 WINDOWS_CLEANUP_SCRIPT_RELATIVE_PATH = (
     pathlib.Path("src-tauri") / "windows" / "kill-backend-processes.ps1"
 )
@@ -263,16 +265,15 @@ def populate_portable_root(
     if cleanup_script.is_file():
         shutil.copy2(cleanup_script, destination_root / "kill-backend-processes.ps1")
 
-    resources_root = destination_root / "resources"
     backend_src = project_config.root / BACKEND_RESOURCE_RELATIVE_PATH
     if not backend_src.is_dir():
         raise FileNotFoundError(f"Required directory not found: {backend_src}")
-    shutil.copytree(backend_src, resources_root / "backend")
+    shutil.copytree(backend_src, destination_root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH)
 
     webui_src = project_config.root / WEBUI_RESOURCE_RELATIVE_PATH
     if not webui_src.is_dir():
         raise FileNotFoundError(f"Required directory not found: {webui_src}")
-    shutil.copytree(webui_src, resources_root / "webui")
+    shutil.copytree(webui_src, destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH)
 
     add_portable_runtime_files(destination_root, project_config)
     validate_portable_root(destination_root)
@@ -292,8 +293,8 @@ def add_portable_runtime_files(
 
 def validate_portable_root(destination_root: pathlib.Path) -> None:
     expected_paths = [
-        destination_root / "resources" / "backend" / "runtime-manifest.json",
-        destination_root / "resources" / "webui" / "index.html",
+        destination_root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json",
+        destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html",
     ]
     missing = [
         str(path.relative_to(destination_root))
