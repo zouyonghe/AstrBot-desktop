@@ -121,7 +121,7 @@ def resolve_bundle_resource_alias_from_tauri_config(
 
     tauri_config_dir = (project_root / TAURI_CONFIG_RELATIVE_PATH).parent.resolve()
     expected_source_path = (project_root / source_relative_path).resolve()
-    expected_source_key = pathlib.PurePosixPath(
+    expected_source_key = pathlib.PureWindowsPath(
         os.path.relpath(expected_source_path, tauri_config_dir)
     ).as_posix()
     alias_text = resources_table.get(expected_source_key)

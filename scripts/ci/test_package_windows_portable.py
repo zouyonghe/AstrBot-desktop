@@ -3,6 +3,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts.ci import package_windows_portable as MODULE
 
@@ -246,6 +247,19 @@ class PackageWindowsPortableTests(unittest.TestCase):
             re.escape("Missing bundle.resources alias for ../resources/backend"),
         ):
             MODULE.load_project_config_from(layout["script_path"])
+
+    def test_load_project_config_from_normalizes_windows_relpath_separators(self):
+        layout = self.make_project_layout()
+
+        with mock.patch.object(
+            MODULE.os.path,
+            "relpath",
+            side_effect=[r"..\resources\backend", r"..\resources\webui"],
+        ):
+            project_config = MODULE.load_project_config_from(layout["script_path"])
+
+        self.assertEqual(project_config.backend_layout_relative_path, Path("backend"))
+        self.assertEqual(project_config.webui_layout_relative_path, Path("webui"))
 
     def test_normalize_legacy_nightly_version_returns_base_version_and_suffix(self):
         self.assertEqual(
