@@ -6,6 +6,9 @@ from pathlib import Path
 
 from scripts.ci import package_windows_portable as MODULE
 
+PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH = MODULE.PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH
+PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH = MODULE.PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH
+
 
 class PackageWindowsPortableTests(unittest.TestCase):
     def make_project_layout(
@@ -423,9 +426,15 @@ class PackageWindowsPortableTests(unittest.TestCase):
         self.assertFalse((destination_root / "astrbot-desktop-tauri.exe").exists())
         self.assertTrue((destination_root / "WebView2Loader.dll").is_file())
         self.assertTrue(
-            (destination_root / "backend" / "runtime-manifest.json").is_file()
+            (
+                destination_root
+                / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH
+                / "runtime-manifest.json"
+            ).is_file()
         )
-        self.assertTrue((destination_root / "webui" / "index.html").is_file())
+        self.assertTrue(
+            (destination_root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").is_file()
+        )
         self.assertFalse((destination_root / "resources" / "backend").exists())
         self.assertFalse((destination_root / "resources" / "webui").exists())
         self.assertTrue((destination_root / "kill-backend-processes.ps1").is_file())
@@ -478,10 +487,14 @@ class PackageWindowsPortableTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "AstrBot.exe").write_text("binary")
-            (root / "backend").mkdir(parents=True)
-            (root / "webui").mkdir(parents=True)
-            (root / "backend" / "runtime-manifest.json").write_text("{}")
-            (root / "webui" / "index.html").write_text("<html></html>")
+            (root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (
+                root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json"
+            ).write_text("{}")
+            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").write_text(
+                "<html></html>"
+            )
 
             MODULE.validate_portable_root(root)
 
@@ -496,10 +509,14 @@ class PackageWindowsPortableTests(unittest.TestCase):
     def test_validate_portable_root_requires_top_level_exe(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            (root / "backend").mkdir(parents=True)
-            (root / "webui").mkdir(parents=True)
-            (root / "backend" / "runtime-manifest.json").write_text("{}")
-            (root / "webui" / "index.html").write_text("<html></html>")
+            (root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH).mkdir(parents=True)
+            (
+                root / PORTABLE_BACKEND_LAYOUT_RELATIVE_PATH / "runtime-manifest.json"
+            ).write_text("{}")
+            (root / PORTABLE_WEBUI_LAYOUT_RELATIVE_PATH / "index.html").write_text(
+                "<html></html>"
+            )
 
             with self.assertRaisesRegex(ValueError, r"top-level \*\.exe"):
                 MODULE.validate_portable_root(root)
