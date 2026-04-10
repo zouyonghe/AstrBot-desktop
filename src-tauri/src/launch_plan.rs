@@ -5,13 +5,26 @@ use std::{
 
 use tauri::AppHandle;
 
-use crate::{packaged_webui, runtime_paths, LaunchPlan, RuntimeManifest};
+use crate::{backend, packaged_webui, runtime_paths, LaunchPlan, RuntimeManifest};
 
 const BACKEND_RESOURCE_ALIAS: &str = env!("ASTRBOT_BACKEND_RESOURCE_ALIAS");
 const WEBUI_RESOURCE_ALIAS: &str = env!("ASTRBOT_WEBUI_RESOURCE_ALIAS");
 
 fn build_packaged_resource_relative_path(resource_alias: &str, leaf_name: &str) -> PathBuf {
     PathBuf::from(resource_alias).join(leaf_name)
+}
+
+fn resolve_launch_startup_heartbeat_path(
+    root_dir: Option<&Path>,
+    packaged_mode: bool,
+) -> Option<PathBuf> {
+    backend::config::resolve_backend_startup_heartbeat_path(
+        root_dir,
+        packaged_mode
+            .then(runtime_paths::default_packaged_root_dir)
+            .flatten(),
+        crate::DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH,
+    )
 }
 
 pub fn resolve_custom_launch(custom_cmd: String) -> Result<LaunchPlan, String> {
@@ -29,6 +42,7 @@ pub fn resolve_custom_launch(custom_cmd: String) -> Result<LaunchPlan, String> {
         .unwrap_or_else(runtime_paths::workspace_root_dir);
     let root_dir = env::var("ASTRBOT_ROOT").ok().map(PathBuf::from);
     let webui_dir = env::var("ASTRBOT_WEBUI_DIR").ok().map(PathBuf::from);
+    let startup_heartbeat_path = resolve_launch_startup_heartbeat_path(root_dir.as_deref(), false);
 
     Ok(LaunchPlan {
         cmd,
@@ -36,6 +50,7 @@ pub fn resolve_custom_launch(custom_cmd: String) -> Result<LaunchPlan, String> {
         cwd,
         root_dir,
         webui_dir,
+        startup_heartbeat_path,
         packaged_mode: false,
     })
 }
@@ -141,6 +156,7 @@ where
         "--webui-dir".to_string(),
         webui_dir.to_string_lossy().to_string(),
     ];
+    let startup_heartbeat_path = resolve_launch_startup_heartbeat_path(root_dir.as_deref(), true);
 
     let plan = LaunchPlan {
         cmd: python_path.to_string_lossy().to_string(),
@@ -148,6 +164,7 @@ where
         cwd,
         root_dir,
         webui_dir: Some(webui_dir),
+        startup_heartbeat_path,
         packaged_mode: true,
     };
     Ok(Some(plan))
@@ -174,6 +191,8 @@ pub fn resolve_dev_launch() -> Result<LaunchPlan, String> {
         args.push("--webui-dir".to_string());
         args.push(path.to_string_lossy().to_string());
     }
+    let root_dir = env::var("ASTRBOT_ROOT").ok().map(PathBuf::from);
+    let startup_heartbeat_path = resolve_launch_startup_heartbeat_path(root_dir.as_deref(), false);
 
     Ok(LaunchPlan {
         cmd: "uv".to_string(),
@@ -181,8 +200,9 @@ pub fn resolve_dev_launch() -> Result<LaunchPlan, String> {
         cwd: env::var("ASTRBOT_BACKEND_CWD")
             .map(PathBuf::from)
             .unwrap_or(source_root),
-        root_dir: env::var("ASTRBOT_ROOT").ok().map(PathBuf::from),
+        root_dir,
         webui_dir,
+        startup_heartbeat_path,
         packaged_mode: false,
     })
 }
@@ -190,6 +210,28 @@ pub fn resolve_dev_launch() -> Result<LaunchPlan, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => env::set_var(self.key, value),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn build_packaged_resource_relative_path_joins_alias_and_leaf_name() {
@@ -200,6 +242,18 @@ mod tests {
         assert_eq!(
             build_packaged_resource_relative_path("runtime/webui", "index.html"),
             PathBuf::from("runtime/webui").join("index.html")
+        );
+    }
+
+    #[test]
+    fn resolve_custom_launch_sets_startup_heartbeat_path_from_root_dir() {
+        let _root_guard = EnvVarGuard::set("ASTRBOT_ROOT", "/tmp/astrbot-root");
+
+        let plan = resolve_custom_launch("python main.py".to_string()).expect("custom plan");
+
+        assert_eq!(
+            plan.startup_heartbeat_path,
+            Some(PathBuf::from("/tmp/astrbot-root").join("data/backend-startup-heartbeat.json"))
         );
     }
 }

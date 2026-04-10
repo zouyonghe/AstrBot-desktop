@@ -184,14 +184,21 @@ impl BackendState {
 #[derive(serde::Deserialize)]
 struct StartupHeartbeatFile {
     pid: u32,
-    state: String,
+    state: StartupHeartbeatState,
     updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum StartupHeartbeatState {
+    Starting,
+    Stopping,
 }
 
 fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<SystemTime> {
     let payload = fs::read_to_string(path).ok()?;
     let heartbeat: StartupHeartbeatFile = serde_json::from_str(&payload).ok()?;
-    if heartbeat.pid != expected_pid || heartbeat.state != "starting" {
+    if heartbeat.pid != expected_pid || heartbeat.state != StartupHeartbeatState::Starting {
         return None;
     }
     Some(UNIX_EPOCH + Duration::from_millis(heartbeat.updated_at_ms))
@@ -294,5 +301,13 @@ mod tests {
             next_startup_heartbeat_at(Some(UNIX_EPOCH + Duration::from_millis(5000)), None),
             None
         );
+    }
+
+    #[test]
+    fn startup_heartbeat_file_rejects_unknown_state() {
+        assert!(serde_json::from_str::<StartupHeartbeatFile>(
+            r#"{"pid":42,"state":"unexpected","updated_at_ms":5000}"#
+        )
+        .is_err());
     }
 }

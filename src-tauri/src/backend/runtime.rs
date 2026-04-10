@@ -47,13 +47,7 @@ where
         ),
         Err(_) => crate::DEFAULT_BACKEND_STARTUP_IDLE_TIMEOUT_MS,
     };
-    readiness.startup_heartbeat_path = backend::config::resolve_backend_startup_heartbeat_path(
-        plan.root_dir.as_deref(),
-        plan.packaged_mode
-            .then(crate::runtime_paths::default_packaged_root_dir)
-            .flatten(),
-        crate::DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH,
-    );
+    readiness.startup_heartbeat_path = plan.startup_heartbeat_path.clone();
     readiness
 }
 

@@ -79,6 +79,7 @@ mod tests {
             cwd: PathBuf::from("."),
             root_dir: None,
             webui_dir: None,
+            startup_heartbeat_path: None,
             packaged_mode: false,
         };
 

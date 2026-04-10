@@ -33,6 +33,7 @@ pub(crate) struct LaunchPlan {
     pub(crate) cwd: PathBuf,
     pub(crate) root_dir: Option<PathBuf>,
     pub(crate) webui_dir: Option<PathBuf>,
+    pub(crate) startup_heartbeat_path: Option<PathBuf>,
     pub(crate) packaged_mode: bool,
 }
 
