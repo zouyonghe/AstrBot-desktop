@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn write_cached_channel_errors_when_state_path_unavailable() {
-        let _root_guard = EnvVarGuard::clear("ASTRBOT_ROOT");
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
 
         let result = write_cached_update_channel(Some(UpdateChannel::Nightly), None);
 
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn read_cached_channel_round_trips_written_value() {
-        let _root_guard = EnvVarGuard::clear("ASTRBOT_ROOT");
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let dir = create_temp_case_dir("round-trip");
         write_cached_update_channel(Some(UpdateChannel::Nightly), Some(&dir))
             .expect("write cached channel");
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn write_cached_channel_preserves_unrelated_state_fields() {
-        let _root_guard = EnvVarGuard::clear("ASTRBOT_ROOT");
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let dir = create_temp_case_dir("preserve-fields");
         let state_path = dir.join("data").join("desktop_state.json");
         fs::create_dir_all(state_path.parent().expect("state dir")).expect("create state dir");
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn resolve_preferred_channel_falls_back_to_installed_version_channel() {
-        let _root_guard = EnvVarGuard::clear("ASTRBOT_ROOT");
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let dir = create_temp_case_dir("fallback");
 
         assert_eq!(

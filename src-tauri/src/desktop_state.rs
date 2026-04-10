@@ -5,7 +5,7 @@ use std::{
 
 pub(crate) fn resolve_desktop_state_path(packaged_root_dir: Option<&Path>) -> Option<PathBuf> {
     resolve_desktop_state_path_with_root(
-        env::var("ASTRBOT_ROOT").ok().as_deref(),
+        env::var(crate::ASTRBOT_ROOT_ENV).ok().as_deref(),
         packaged_root_dir,
     )
 }

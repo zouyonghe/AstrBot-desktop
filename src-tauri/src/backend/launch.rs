@@ -123,7 +123,10 @@ impl BackendState {
         }
 
         if let Some(root_dir) = &plan.root_dir {
-            command.env("ASTRBOT_ROOT", root_dir);
+            command.env(crate::ASTRBOT_ROOT_ENV, root_dir);
+        }
+        if let Some(heartbeat_path) = plan.startup_heartbeat_path.as_ref() {
+            command.env(crate::BACKEND_STARTUP_HEARTBEAT_PATH_ENV, heartbeat_path);
         }
         if let Some(webui_dir) = &plan.webui_dir {
             command.env("ASTRBOT_WEBUI_DIR", webui_dir);

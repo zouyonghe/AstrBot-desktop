@@ -1,4 +1,5 @@
 use std::env;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use url::Url;
 
@@ -7,6 +8,8 @@ pub struct BackendReadinessConfig {
     pub path: String,
     pub probe_timeout_ms: u64,
     pub poll_interval_ms: u64,
+    pub startup_idle_timeout_ms: u64,
+    pub startup_heartbeat_path: Option<PathBuf>,
 }
 
 pub fn resolve_backend_ready_http_path<F>(env_name: &str, default_path: &str, mut log: F) -> String
@@ -95,6 +98,47 @@ where
     F: FnMut(String),
 {
     parse_clamped_timeout_env(raw, env_name, fallback_ms, min_ms, max_ms, log)
+}
+
+pub fn resolve_backend_startup_idle_timeout_ms<F>(
+    raw: &str,
+    env_name: &str,
+    fallback_ms: u64,
+    min_ms: u64,
+    max_ms: u64,
+    log: F,
+) -> u64
+where
+    F: FnMut(String),
+{
+    parse_clamped_timeout_env(raw, env_name, fallback_ms, min_ms, max_ms, log)
+}
+
+pub fn resolve_backend_startup_heartbeat_path(
+    root_dir: Option<&Path>,
+    packaged_root: Option<PathBuf>,
+    relative_path: &str,
+) -> Option<PathBuf> {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Prefer the launch plan's resolved root so spawn-time and readiness-time heartbeat paths
+    // stay aligned. Falling back to ASTRBOT_ROOT only helps older/custom call sites that do not
+    // pass a root dir; packaged launches may finally fall back to the default packaged root.
+    if let Some(root) = root_dir {
+        return Some(root.join(trimmed));
+    }
+
+    if let Ok(root) = env::var(crate::ASTRBOT_ROOT_ENV) {
+        let root = PathBuf::from(root.trim());
+        if !root.as_os_str().is_empty() {
+            return Some(root.join(trimmed));
+        }
+    }
+
+    packaged_root.map(|root| root.join(trimmed))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -221,6 +265,8 @@ where
         path,
         probe_timeout_ms,
         poll_interval_ms,
+        startup_idle_timeout_ms: 0,
+        startup_heartbeat_path: None,
     }
 }
 
@@ -258,6 +304,47 @@ mod tests {
     fn parse_ping_timeout_delegates_to_clamp() {
         let value = parse_ping_timeout_env("99999", "TEST_ENV", 500, 100, 3_000, |_| {});
         assert_eq!(value, 3_000);
+    }
+
+    #[test]
+    fn resolve_backend_startup_idle_timeout_clamps_large_value() {
+        let value = resolve_backend_startup_idle_timeout_ms(
+            "999999",
+            "TEST_STARTUP_IDLE_TIMEOUT_ENV",
+            60_000,
+            5_000,
+            300_000,
+            |_| {},
+        );
+        assert_eq!(value, 300_000);
+    }
+
+    #[test]
+    fn resolve_backend_startup_idle_timeout_clamps_small_value() {
+        let value = resolve_backend_startup_idle_timeout_ms(
+            "1000",
+            "TEST_STARTUP_IDLE_TIMEOUT_ENV",
+            60_000,
+            5_000,
+            300_000,
+            |_| {},
+        );
+        assert_eq!(value, 5_000);
+    }
+
+    #[test]
+    fn resolve_backend_startup_heartbeat_path_prefers_root_dir() {
+        let path = resolve_backend_startup_heartbeat_path(
+            Some(Path::new("/tmp/astrbot-root")),
+            Some(PathBuf::from("/tmp/packaged-root")),
+            "data/backend-startup-heartbeat.json",
+        )
+        .expect("expected heartbeat path");
+
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/astrbot-root").join("data/backend-startup-heartbeat.json")
+        );
     }
 
     #[test]

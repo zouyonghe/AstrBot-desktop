@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 pub(crate) const DEFAULT_BACKEND_URL: &str = "http://127.0.0.1:6185/";
+pub(crate) const ASTRBOT_ROOT_ENV: &str = "ASTRBOT_ROOT";
 pub(crate) const BACKEND_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_TIMEOUT_MS";
-pub(crate) const PACKAGED_BACKEND_TIMEOUT_FALLBACK_MS: u64 = 5 * 60 * 1000;
+pub(crate) const PACKAGED_BACKEND_TIMEOUT_FALLBACK_MS: u64 = 15 * 60 * 1000;
 pub(crate) const GRACEFUL_RESTART_REQUEST_TIMEOUT_MS: u64 = 2_500;
 pub(crate) const GRACEFUL_RESTART_START_TIME_TIMEOUT_MS: u64 = 1_800;
 pub(crate) const GRACEFUL_RESTART_POLL_INTERVAL_MS: u64 = 350;
@@ -17,6 +18,15 @@ pub(crate) const BACKEND_READY_PROBE_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_READY_
 pub(crate) const BACKEND_READY_PROBE_TIMEOUT_MIN_MS: u64 = 100;
 pub(crate) const BACKEND_READY_PROBE_TIMEOUT_MAX_MS: u64 = 30_000;
 pub(crate) const BACKEND_READY_TCP_PROBE_TIMEOUT_MAX_MS: u64 = 1_000;
+pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_STARTUP_IDLE_TIMEOUT_MS";
+pub(crate) const DEFAULT_BACKEND_STARTUP_IDLE_TIMEOUT_MS: u64 = 60 * 1000;
+pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_MIN_MS: u64 = 5_000;
+pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_MAX_MS: u64 = 15 * 60 * 1000;
+// Keep this in sync with STARTUP_HEARTBEAT_ENV in scripts/backend/templates/launch_backend.py.
+pub(crate) const BACKEND_STARTUP_HEARTBEAT_PATH_ENV: &str =
+    "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH";
+pub(crate) const DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH: &str =
+    "data/backend-startup-heartbeat.json";
 pub(crate) const DEFAULT_BACKEND_PING_TIMEOUT_MS: u64 = 800;
 pub(crate) const BACKEND_PING_TIMEOUT_MIN_MS: u64 = 50;
 pub(crate) const BACKEND_PING_TIMEOUT_MAX_MS: u64 = 30_000;

@@ -145,7 +145,7 @@ pub fn resolve_desktop_log_path(packaged_root: Option<PathBuf>, desktop_log_file
         }
     }
 
-    if let Ok(root) = env::var("ASTRBOT_ROOT") {
+    if let Ok(root) = env::var(crate::ASTRBOT_ROOT_ENV) {
         let root = PathBuf::from(root.trim());
         if !root.as_os_str().is_empty() {
             return root.join("logs").join(desktop_log_file);
@@ -169,7 +169,7 @@ pub fn resolve_backend_log_path(
     if let Some(root) = root_dir {
         return root.join("logs").join("backend.log");
     }
-    if let Ok(root) = env::var("ASTRBOT_ROOT") {
+    if let Ok(root) = env::var(crate::ASTRBOT_ROOT_ENV) {
         let path = PathBuf::from(root.trim());
         if !path.as_os_str().is_empty() {
             return path.join("logs").join("backend.log");

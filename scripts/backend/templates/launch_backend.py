@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import atexit
 import ctypes
+import json
 import os
 import runpy
 import sys
+import threading
+import time
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR / "app"
 _WINDOWS_DLL_DIRECTORY_HANDLES: list[object] = []
+# Keep this in sync with BACKEND_STARTUP_HEARTBEAT_PATH_ENV in src-tauri/src/app_constants.rs.
+STARTUP_HEARTBEAT_ENV = "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH"
+STARTUP_HEARTBEAT_INTERVAL_SECONDS = 2.0
+STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS = 1.0
 
 
 def configure_stdio_utf8() -> None:
@@ -113,15 +121,120 @@ def preload_windows_runtime_dlls() -> None:
                     continue
 
 
-configure_stdio_utf8()
-configure_windows_dll_search_path()
-preload_windows_runtime_dlls()
+def resolve_startup_heartbeat_path() -> Path | None:
+    raw = os.environ.get(STARTUP_HEARTBEAT_ENV, "").strip()
+    if not raw:
+        return None
+    return Path(raw)
 
-sys.path.insert(0, str(APP_DIR))
 
-main_file = APP_DIR / "main.py"
-if not main_file.is_file():
-    raise FileNotFoundError(f"Backend entrypoint not found: {main_file}")
+def build_heartbeat_payload(state: str) -> dict[str, object]:
+    return {
+        "pid": os.getpid(),
+        "state": state,
+        "updated_at_ms": int(time.time() * 1000),
+    }
 
-sys.argv[0] = str(main_file)
-runpy.run_path(str(main_file), run_name="__main__")
+
+def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    temp_path = path.with_name(f"{path.name}.tmp")
+    temp_path.write_text(
+        json.dumps(payload, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    try:
+        temp_path.replace(path)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def write_startup_heartbeat(
+    path: Path, state: str, *, warn_on_error: bool = False
+) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, build_heartbeat_payload(state))
+        return True
+    except Exception as exc:
+        if warn_on_error:
+            print(
+                f"[startup-heartbeat] failed to write heartbeat to {path}: {exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+            )
+        return False
+
+
+def heartbeat_loop(
+    path: Path, interval_seconds: float, stop_event: threading.Event
+) -> None:
+    # At least one successful write has happened.
+    had_successful_write = False
+    # A warning has already been emitted since the last successful write.
+    warning_emitted_since_last_success = False
+
+    def should_warn() -> bool:
+        # Before the first successful heartbeat we want every failure to surface so startup
+        # path/permission issues stay visible. After a success, only warn on the first failure in
+        # each consecutive failure run to avoid log spam.
+        return (not had_successful_write) or (not warning_emitted_since_last_success)
+
+    ok = write_startup_heartbeat(path, "starting", warn_on_error=True)
+    if ok:
+        had_successful_write = True
+    else:
+        warning_emitted_since_last_success = True
+
+    while not stop_event.wait(interval_seconds):
+        warn_now = should_warn()
+        ok = write_startup_heartbeat(path, "starting", warn_on_error=warn_now)
+        if ok:
+            had_successful_write = True
+            warning_emitted_since_last_success = False
+        elif warn_now:
+            warning_emitted_since_last_success = True
+
+
+def start_startup_heartbeat() -> None:
+    heartbeat_path = resolve_startup_heartbeat_path()
+    if heartbeat_path is None:
+        return
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=heartbeat_loop,
+        args=(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS, stop_event),
+        name="astrbot-startup-heartbeat",
+        daemon=True,
+    )
+
+    def on_exit() -> None:
+        stop_event.set()
+        thread.join(timeout=STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS)
+        write_startup_heartbeat(heartbeat_path, "stopping", warn_on_error=True)
+
+    thread.start()
+    atexit.register(on_exit)
+
+
+def main() -> None:
+    configure_stdio_utf8()
+    configure_windows_dll_search_path()
+    preload_windows_runtime_dlls()
+    start_startup_heartbeat()
+
+    sys.path.insert(0, str(APP_DIR))
+
+    main_file = APP_DIR / "main.py"
+    if not main_file.is_file():
+        raise FileNotFoundError(f"Backend entrypoint not found: {main_file}")
+
+    sys.argv[0] = str(main_file)
+    runpy.run_path(str(main_file), run_name="__main__")
+
+
+if __name__ == "__main__":
+    main()

@@ -340,6 +340,7 @@ mod tests {
             cwd: std::path::PathBuf::from("."),
             root_dir: None,
             webui_dir: None,
+            startup_heartbeat_path: None,
             packaged_mode: true,
         };
         let state = BackendState::default();
