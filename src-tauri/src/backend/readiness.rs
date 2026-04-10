@@ -316,14 +316,6 @@ mod tests {
 
     #[test]
     fn startup_heartbeat_progress_is_fresh_for_recent_instant() {
-        let temp_dir = TempDir::new().expect("create temp dir");
-        let heartbeat_path = temp_dir.path().join("startup-heartbeat.json");
-        std::fs::write(
-            &heartbeat_path,
-            r#"{"pid":42,"state":"starting","updated_at_ms":5000}"#,
-        )
-        .expect("write heartbeat file");
-
         assert!(startup_heartbeat_progress_is_fresh(
             Some(Instant::now()),
             Instant::now() + Duration::from_millis(500),
@@ -333,14 +325,6 @@ mod tests {
 
     #[test]
     fn startup_heartbeat_progress_is_not_fresh_when_stale() {
-        let temp_dir = TempDir::new().expect("create temp dir");
-        let heartbeat_path = temp_dir.path().join("startup-heartbeat.json");
-        std::fs::write(
-            &heartbeat_path,
-            r#"{"pid":42,"state":"starting","updated_at_ms":1000}"#,
-        )
-        .expect("write heartbeat file");
-
         assert!(!startup_heartbeat_progress_is_fresh(
             Some(Instant::now()),
             Instant::now() + Duration::from_millis(1500),

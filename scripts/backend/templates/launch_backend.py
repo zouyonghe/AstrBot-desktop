@@ -142,7 +142,14 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
         json.dumps(payload, separators=(",", ":")),
         encoding="utf-8",
     )
-    temp_path.replace(path)
+    try:
+        temp_path.replace(path)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 def write_startup_heartbeat(
@@ -209,8 +216,8 @@ def start_startup_heartbeat() -> None:
         thread.join(timeout=STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS)
         write_startup_heartbeat(heartbeat_path, "stopping", warn_on_error=True)
 
-    atexit.register(on_exit)
     thread.start()
+    atexit.register(on_exit)
 
 
 def main() -> None:
