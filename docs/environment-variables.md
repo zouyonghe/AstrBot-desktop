@@ -9,7 +9,8 @@
 | --- | --- | --- |
 | `ASTRBOT_BACKEND_URL` | 后端基础 URL | 默认 `http://127.0.0.1:6185/` |
 | `ASTRBOT_BACKEND_AUTO_START` | 是否自动拉起后端 | 默认 `1`（启用） |
-| `ASTRBOT_BACKEND_TIMEOUT_MS` | 后端就绪等待超时 | 开发模式默认 `20000`；打包模式默认回退 `300000` |
+| `ASTRBOT_BACKEND_TIMEOUT_MS` | 后端就绪等待超时 | 开发模式默认 `20000`；打包模式默认回退 `900000` |
+| `ASTRBOT_BACKEND_STARTUP_IDLE_TIMEOUT_MS` | 后端启动 heartbeat 空闲超时 | 默认 `60000`，范围 `5000~900000` |
 | `ASTRBOT_BACKEND_READY_HTTP_PATH` | 就绪探针 HTTP 路径 | 默认 `/api/stat/start-time` |
 | `ASTRBOT_BACKEND_READY_PROBE_TIMEOUT_MS` | 就绪探针单次超时 | 默认回退到 `ASTRBOT_BACKEND_PING_TIMEOUT_MS` |
 | `ASTRBOT_BACKEND_READY_POLL_INTERVAL_MS` | 就绪轮询间隔 | 默认 `300`，并按边界 clamp |
@@ -53,6 +54,7 @@
 | 变量 | 用途 | 默认值/行为 |
 | --- | --- | --- |
 | `ASTRBOT_DESKTOP_CLIENT` | 标记桌面客户端环境 | 打包态启动后端时写入 `1` |
+| `ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH` | 桌面端写给后端启动器的 heartbeat 文件路径 | 打包态默认写到 `ASTRBOT_ROOT/data/backend-startup-heartbeat.json` |
 
 ## 4. 发布/CI（GitHub Actions）
 

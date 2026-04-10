@@ -15,12 +15,15 @@ pub fn backend_wait_timeout(packaged_mode: bool) -> Duration {
     .unwrap_or(Duration::from_millis(20_000))
 }
 
-pub fn backend_readiness_config<F>(log: F) -> backend::config::BackendReadinessConfig
+pub fn backend_readiness_config<F>(
+    plan: &crate::LaunchPlan,
+    log: F,
+) -> backend::config::BackendReadinessConfig
 where
     F: Fn(&str) + Copy,
 {
     let probe_timeout_fallback = backend_ping_timeout_ms(log);
-    backend::config::backend_readiness_config(
+    let mut readiness = backend::config::backend_readiness_config(
         crate::BACKEND_READY_HTTP_PATH_ENV,
         crate::DEFAULT_BACKEND_READY_HTTP_PATH,
         crate::BACKEND_READY_PROBE_TIMEOUT_ENV,
@@ -32,7 +35,26 @@ where
         crate::BACKEND_READY_POLL_INTERVAL_MIN_MS,
         crate::BACKEND_READY_POLL_INTERVAL_MAX_MS,
         |message| log(&message),
-    )
+    );
+    readiness.startup_idle_timeout_ms = match env::var(crate::BACKEND_STARTUP_IDLE_TIMEOUT_ENV) {
+        Ok(raw) => backend::config::resolve_backend_startup_idle_timeout_ms(
+            &raw,
+            crate::BACKEND_STARTUP_IDLE_TIMEOUT_ENV,
+            crate::DEFAULT_BACKEND_STARTUP_IDLE_TIMEOUT_MS,
+            crate::BACKEND_STARTUP_IDLE_TIMEOUT_MIN_MS,
+            crate::BACKEND_STARTUP_IDLE_TIMEOUT_MAX_MS,
+            |message| log(&message),
+        ),
+        Err(_) => crate::DEFAULT_BACKEND_STARTUP_IDLE_TIMEOUT_MS,
+    };
+    readiness.startup_heartbeat_path = backend::config::resolve_backend_startup_heartbeat_path(
+        plan.root_dir.as_deref(),
+        plan.packaged_mode
+            .then(crate::runtime_paths::default_packaged_root_dir)
+            .flatten(),
+        crate::DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH,
+    );
+    readiness
 }
 
 pub fn backend_ping_timeout_ms<F>(log: F) -> u64

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import atexit
 import ctypes
+import json
 import os
 import runpy
 import sys
+import threading
+import time
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR / "app"
 _WINDOWS_DLL_DIRECTORY_HANDLES: list[object] = []
+STARTUP_HEARTBEAT_ENV = "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH"
+STARTUP_HEARTBEAT_INTERVAL_SECONDS = 2.0
 
 
 def configure_stdio_utf8() -> None:
@@ -113,9 +119,59 @@ def preload_windows_runtime_dlls() -> None:
                     continue
 
 
+def resolve_startup_heartbeat_path() -> Path | None:
+    raw = os.environ.get(STARTUP_HEARTBEAT_ENV, "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
+def write_startup_heartbeat(path: Path, state: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "pid": os.getpid(),
+            "state": state,
+            "updated_at_ms": int(time.time() * 1000),
+        }
+        temp_path = path.with_name(f"{path.name}.tmp")
+        temp_path.write_text(
+            json.dumps(payload, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+    except Exception:
+        return
+
+
+def start_startup_heartbeat() -> None:
+    heartbeat_path = resolve_startup_heartbeat_path()
+    if heartbeat_path is None:
+        return
+
+    stop_event = threading.Event()
+    write_startup_heartbeat(heartbeat_path, "starting")
+
+    def stop_heartbeat() -> None:
+        stop_event.set()
+        write_startup_heartbeat(heartbeat_path, "stopping")
+
+    def heartbeat_loop() -> None:
+        while not stop_event.wait(STARTUP_HEARTBEAT_INTERVAL_SECONDS):
+            write_startup_heartbeat(heartbeat_path, "starting")
+
+    atexit.register(stop_heartbeat)
+    threading.Thread(
+        target=heartbeat_loop,
+        name="astrbot-startup-heartbeat",
+        daemon=True,
+    ).start()
+
+
 configure_stdio_utf8()
 configure_windows_dll_search_path()
 preload_windows_runtime_dlls()
+start_startup_heartbeat()
 
 sys.path.insert(0, str(APP_DIR))
 

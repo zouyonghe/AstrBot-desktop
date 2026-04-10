@@ -10,7 +10,7 @@ use std::os::windows::process::CommandExt;
 use tauri::AppHandle;
 
 use crate::{
-    append_desktop_log, backend_path_override, build_debug_command, launch_plan, logging,
+    append_desktop_log, backend, backend_path_override, build_debug_command, launch_plan, logging,
     runtime_paths, BackendState, BACKEND_LOG_MAX_BYTES, DEFAULT_SHELL_LOCALE, LOG_BACKUP_COUNT,
 };
 #[cfg(target_os = "windows")]
@@ -124,6 +124,15 @@ impl BackendState {
 
         if let Some(root_dir) = &plan.root_dir {
             command.env("ASTRBOT_ROOT", root_dir);
+        }
+        if let Some(heartbeat_path) = backend::config::resolve_backend_startup_heartbeat_path(
+            plan.root_dir.as_deref(),
+            plan.packaged_mode
+                .then(runtime_paths::default_packaged_root_dir)
+                .flatten(),
+            crate::DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH,
+        ) {
+            command.env(crate::BACKEND_STARTUP_HEARTBEAT_PATH_ENV, heartbeat_path);
         }
         if let Some(webui_dir) = &plan.webui_dir {
             command.env("ASTRBOT_WEBUI_DIR", webui_dir);
