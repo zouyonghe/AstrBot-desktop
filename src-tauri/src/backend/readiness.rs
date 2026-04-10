@@ -55,7 +55,8 @@ impl BackendState {
             if matches!(http_status, Some(status_code) if (200..400).contains(&status_code)) {
                 return Ok(());
             }
-            let now = SystemTime::now();
+            let wall_now = SystemTime::now();
+            let monotonic_now = Instant::now();
 
             let child_pid = self.live_child_pid()?;
 
@@ -63,7 +64,8 @@ impl BackendState {
                 step_startup_heartbeat(
                     heartbeat_path,
                     child_pid,
-                    now,
+                    wall_now,
+                    monotonic_now,
                     startup_idle_timeout,
                     &mut startup_heartbeat_state,
                 )?;
@@ -84,7 +86,7 @@ impl BackendState {
                     self.log_backend_readiness_timeout(
                         limit,
                         &readiness,
-                        now,
+                        wall_now,
                         http_status,
                         ever_tcp_reachable,
                         startup_heartbeat_state.last_seen_at,
@@ -179,6 +181,8 @@ enum StartupHeartbeatState {
 #[derive(Debug, Clone, Copy)]
 struct StartupHeartbeatTracker {
     last_seen_at: Option<SystemTime>,
+    last_progress_at: Option<Instant>,
+    consecutive_invalid_reads: u8,
     logged_fresh: bool,
 }
 
@@ -186,10 +190,14 @@ impl StartupHeartbeatTracker {
     fn new() -> Self {
         Self {
             last_seen_at: None,
+            last_progress_at: None,
+            consecutive_invalid_reads: 0,
             logged_fresh: false,
         }
     }
 }
+
+const STARTUP_HEARTBEAT_INVALID_READ_THRESHOLD: u8 = 2;
 
 fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<SystemTime> {
     let payload = fs::read_to_string(path).ok()?;
@@ -200,14 +208,12 @@ fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<S
     UNIX_EPOCH.checked_add(Duration::from_millis(heartbeat.updated_at_ms))
 }
 
-fn startup_heartbeat_timestamp_is_fresh(
-    updated_at: Option<SystemTime>,
-    now: SystemTime,
+fn startup_heartbeat_progress_is_fresh(
+    last_progress_at: Option<Instant>,
+    now: Instant,
     max_age: Duration,
 ) -> bool {
-    updated_at
-        .and_then(|updated_at| ms_since(updated_at, now))
-        .is_some_and(|age_ms| age_ms <= max_age.as_millis())
+    last_progress_at.is_some_and(|updated_at| now.duration_since(updated_at) <= max_age)
 }
 
 fn ms_since(earlier: SystemTime, now: SystemTime) -> Option<u128> {
@@ -232,7 +238,8 @@ fn describe_heartbeat_age(
 fn step_startup_heartbeat(
     heartbeat_path: &Path,
     child_pid: u32,
-    now: SystemTime,
+    wall_now: SystemTime,
+    monotonic_now: Instant,
     idle_timeout: Duration,
     state: &mut StartupHeartbeatTracker,
 ) -> Result<(), String> {
@@ -241,9 +248,12 @@ fn step_startup_heartbeat(
 
     match (previous, current) {
         (Some(previous), None) => {
-            let heartbeat_age_ms = ms_since(previous, now)
-                .map(|age| age.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            state.consecutive_invalid_reads = state.consecutive_invalid_reads.saturating_add(1);
+            if state.consecutive_invalid_reads < STARTUP_HEARTBEAT_INVALID_READ_THRESHOLD {
+                return Ok(());
+            }
+
+            let heartbeat_age_ms = describe_heartbeat_age(Some(previous), wall_now);
             append_desktop_log(&format!(
                 "backend startup heartbeat disappeared or became invalid before HTTP dashboard became ready: last_valid_age_ms={heartbeat_age_ms}"
             ));
@@ -252,14 +262,30 @@ fn step_startup_heartbeat(
                     .to_string(),
             )
         }
-        (None, None) => Ok(()),
+        (None, None) => {
+            state.consecutive_invalid_reads = 0;
+            Ok(())
+        }
         (_, Some(current)) => {
+            state.consecutive_invalid_reads = 0;
             let updated_at = match previous {
                 Some(previous) if current <= previous => previous,
                 _ => current,
             };
             state.last_seen_at = Some(updated_at);
-            if startup_heartbeat_timestamp_is_fresh(state.last_seen_at, now, idle_timeout) {
+
+            if previous.is_none()
+                || Some(updated_at) != previous
+                || state.last_progress_at.is_none()
+            {
+                state.last_progress_at = Some(monotonic_now);
+            }
+
+            if startup_heartbeat_progress_is_fresh(
+                state.last_progress_at,
+                monotonic_now,
+                idle_timeout,
+            ) {
                 if !state.logged_fresh {
                     append_desktop_log(
                         "backend startup heartbeat is fresh while HTTP dashboard is not ready yet; waiting",
@@ -282,14 +308,14 @@ fn step_startup_heartbeat(
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, UNIX_EPOCH};
 
     use tempfile::TempDir;
 
     use super::*;
 
     #[test]
-    fn startup_heartbeat_is_fresh_for_recent_timestamp() {
+    fn startup_heartbeat_progress_is_fresh_for_recent_instant() {
         let temp_dir = TempDir::new().expect("create temp dir");
         let heartbeat_path = temp_dir.path().join("startup-heartbeat.json");
         std::fs::write(
@@ -298,18 +324,15 @@ mod tests {
         )
         .expect("write heartbeat file");
 
-        let updated_at =
-            read_startup_heartbeat_updated_at(&heartbeat_path, 42).expect("heartbeat timestamp");
-
-        assert!(startup_heartbeat_timestamp_is_fresh(
-            Some(updated_at),
-            UNIX_EPOCH + Duration::from_millis(5500),
+        assert!(startup_heartbeat_progress_is_fresh(
+            Some(Instant::now()),
+            Instant::now() + Duration::from_millis(500),
             Duration::from_secs(1),
         ));
     }
 
     #[test]
-    fn startup_heartbeat_is_not_fresh_for_stale_timestamp() {
+    fn startup_heartbeat_progress_is_not_fresh_when_stale() {
         let temp_dir = TempDir::new().expect("create temp dir");
         let heartbeat_path = temp_dir.path().join("startup-heartbeat.json");
         std::fs::write(
@@ -318,12 +341,9 @@ mod tests {
         )
         .expect("write heartbeat file");
 
-        let updated_at =
-            read_startup_heartbeat_updated_at(&heartbeat_path, 42).expect("heartbeat timestamp");
-
-        assert!(!startup_heartbeat_timestamp_is_fresh(
-            Some(updated_at),
-            SystemTime::UNIX_EPOCH + Duration::from_millis(5000),
+        assert!(!startup_heartbeat_progress_is_fresh(
+            Some(Instant::now()),
+            Instant::now() + Duration::from_millis(1500),
             Duration::from_secs(1),
         ));
     }
@@ -342,31 +362,36 @@ mod tests {
     }
 
     #[test]
-    fn startup_heartbeat_is_not_fresh_for_future_timestamp() {
-        assert!(!startup_heartbeat_timestamp_is_fresh(
-            Some(UNIX_EPOCH + Duration::from_millis(6000)),
-            UNIX_EPOCH + Duration::from_millis(5500),
-            Duration::from_secs(1),
-        ));
-    }
-
-    #[test]
     fn step_startup_heartbeat_fails_when_existing_heartbeat_disappears() {
         let temp_dir = TempDir::new().expect("create temp dir");
         let heartbeat_path = temp_dir.path().join("missing-startup-heartbeat.json");
+        let monotonic_now = Instant::now();
         let mut tracker = StartupHeartbeatTracker {
             last_seen_at: Some(UNIX_EPOCH + Duration::from_millis(5000)),
+            last_progress_at: Some(monotonic_now),
+            consecutive_invalid_reads: 0,
             logged_fresh: false,
         };
 
-        let result = step_startup_heartbeat(
+        let first_result = step_startup_heartbeat(
             &heartbeat_path,
             42,
             UNIX_EPOCH + Duration::from_millis(5500),
+            monotonic_now,
             Duration::from_secs(1),
             &mut tracker,
         );
 
+        let result = step_startup_heartbeat(
+            &heartbeat_path,
+            42,
+            UNIX_EPOCH + Duration::from_millis(5600),
+            monotonic_now + Duration::from_millis(100),
+            Duration::from_secs(1),
+            &mut tracker,
+        );
+
+        assert_eq!(first_result, Ok(()));
         assert_eq!(
             result,
             Err(
@@ -374,6 +399,31 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn step_startup_heartbeat_tolerates_single_missing_read_after_valid_heartbeat() {
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let heartbeat_path = temp_dir.path().join("missing-startup-heartbeat.json");
+        let monotonic_now = Instant::now();
+        let mut tracker = StartupHeartbeatTracker {
+            last_seen_at: Some(UNIX_EPOCH + Duration::from_millis(5000)),
+            last_progress_at: Some(monotonic_now),
+            consecutive_invalid_reads: 0,
+            logged_fresh: false,
+        };
+
+        let result = step_startup_heartbeat(
+            &heartbeat_path,
+            42,
+            UNIX_EPOCH + Duration::from_millis(5500),
+            monotonic_now,
+            Duration::from_secs(1),
+            &mut tracker,
+        );
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(tracker.consecutive_invalid_reads, 1);
     }
 
     #[test]
