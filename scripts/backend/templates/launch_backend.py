@@ -126,7 +126,9 @@ def resolve_startup_heartbeat_path() -> Path | None:
     return Path(raw)
 
 
-def write_startup_heartbeat(path: Path, state: str) -> None:
+def write_startup_heartbeat(
+    path: Path, state: str, *, warn_on_error: bool = False
+) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -140,8 +142,14 @@ def write_startup_heartbeat(path: Path, state: str) -> None:
             encoding="utf-8",
         )
         temp_path.replace(path)
-    except Exception:
-        return
+        return True
+    except Exception as exc:
+        if warn_on_error:
+            print(
+                f"[startup-heartbeat] failed to write heartbeat to {path}: {exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+            )
+        return False
 
 
 def start_startup_heartbeat() -> None:
@@ -150,15 +158,28 @@ def start_startup_heartbeat() -> None:
         return
 
     stop_event = threading.Event()
-    write_startup_heartbeat(heartbeat_path, "starting")
+    warning_emitted = not write_startup_heartbeat(
+        heartbeat_path,
+        "starting",
+        warn_on_error=True,
+    )
+
+    def refresh_heartbeat(state: str) -> None:
+        nonlocal warning_emitted
+        if not write_startup_heartbeat(
+            heartbeat_path,
+            state,
+            warn_on_error=not warning_emitted,
+        ):
+            warning_emitted = True
 
     def stop_heartbeat() -> None:
         stop_event.set()
-        write_startup_heartbeat(heartbeat_path, "stopping")
+        refresh_heartbeat("stopping")
 
     def heartbeat_loop() -> None:
         while not stop_event.wait(STARTUP_HEARTBEAT_INTERVAL_SECONDS):
-            write_startup_heartbeat(heartbeat_path, "starting")
+            refresh_heartbeat("starting")
 
     atexit.register(stop_heartbeat)
     threading.Thread(

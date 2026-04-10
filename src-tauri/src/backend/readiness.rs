@@ -82,10 +82,31 @@ impl BackendState {
             };
 
             if let Some(heartbeat_path) = readiness.startup_heartbeat_path.as_deref() {
-                last_startup_heartbeat_at = next_startup_heartbeat_at(
+                match next_startup_heartbeat_at(
                     last_startup_heartbeat_at,
                     read_startup_heartbeat_updated_at(heartbeat_path, child_pid),
-                );
+                ) {
+                    StartupHeartbeatObservation::Missing => {
+                        last_startup_heartbeat_at = None;
+                    }
+                    StartupHeartbeatObservation::Observed(updated_at) => {
+                        last_startup_heartbeat_at = Some(updated_at);
+                    }
+                    StartupHeartbeatObservation::Invalidated(previous) => {
+                        let heartbeat_age_ms = SystemTime::now()
+                            .duration_since(previous)
+                            .ok()
+                            .map(|age| age.as_millis().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        append_desktop_log(&format!(
+                            "backend startup heartbeat disappeared or became invalid before HTTP dashboard became ready: last_valid_age_ms={heartbeat_age_ms}"
+                        ));
+                        return Err(
+                            "Backend startup heartbeat disappeared or became invalid before HTTP readiness."
+                                .to_string(),
+                        );
+                    }
+                }
 
                 if startup_heartbeat_timestamp_is_fresh(
                     last_startup_heartbeat_at,
@@ -195,6 +216,13 @@ enum StartupHeartbeatState {
     Stopping,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupHeartbeatObservation {
+    Missing,
+    Observed(SystemTime),
+    Invalidated(SystemTime),
+}
+
 fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<SystemTime> {
     let payload = fs::read_to_string(path).ok()?;
     let heartbeat: StartupHeartbeatFile = serde_json::from_str(&payload).ok()?;
@@ -217,11 +245,14 @@ fn startup_heartbeat_timestamp_is_fresh(
 fn next_startup_heartbeat_at(
     previous: Option<SystemTime>,
     current: Option<SystemTime>,
-) -> Option<SystemTime> {
+) -> StartupHeartbeatObservation {
     match (previous, current) {
-        (_, None) => None,
-        (Some(previous), Some(current)) if current <= previous => Some(previous),
-        (_, Some(current)) => Some(current),
+        (Some(previous), None) => StartupHeartbeatObservation::Invalidated(previous),
+        (None, None) => StartupHeartbeatObservation::Missing,
+        (Some(previous), Some(current)) if current <= previous => {
+            StartupHeartbeatObservation::Observed(previous)
+        }
+        (_, Some(current)) => StartupHeartbeatObservation::Observed(current),
     }
 }
 
@@ -296,10 +327,10 @@ mod tests {
     }
 
     #[test]
-    fn next_startup_heartbeat_at_clears_previous_timestamp_when_current_is_invalid() {
+    fn next_startup_heartbeat_at_marks_previous_timestamp_invalid_when_current_is_missing() {
         assert_eq!(
             next_startup_heartbeat_at(Some(UNIX_EPOCH + Duration::from_millis(5000)), None),
-            None
+            StartupHeartbeatObservation::Invalidated(UNIX_EPOCH + Duration::from_millis(5000))
         );
     }
 
