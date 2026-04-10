@@ -157,15 +157,24 @@ class StartupHeartbeat:
         self._path = path
         self._interval_seconds = interval_seconds
         self._stop_event = threading.Event()
+        self._had_successful_write = False
         self._warning_emitted = False
 
     def _write(self, state: str, *, warn_on_error: bool) -> bool:
+        effective_warn_on_error = warn_on_error and (
+            state == "stopping"
+            or not self._warning_emitted
+            or not self._had_successful_write
+        )
         ok = write_startup_heartbeat(
             self._path,
             state,
-            warn_on_error=warn_on_error,
+            warn_on_error=effective_warn_on_error,
         )
-        if not ok:
+        if ok:
+            self._had_successful_write = True
+            self._warning_emitted = False
+        elif effective_warn_on_error:
             self._warning_emitted = True
         return ok
 
@@ -180,11 +189,11 @@ class StartupHeartbeat:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._write("stopping", warn_on_error=not self._warning_emitted)
+        self._write("stopping", warn_on_error=True)
 
     def _loop(self) -> None:
         while not self._stop_event.wait(self._interval_seconds):
-            self._write("starting", warn_on_error=not self._warning_emitted)
+            self._write("starting", warn_on_error=True)
 
 
 def start_startup_heartbeat() -> None:
@@ -195,16 +204,21 @@ def start_startup_heartbeat() -> None:
     StartupHeartbeat(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS).start()
 
 
-configure_stdio_utf8()
-configure_windows_dll_search_path()
-preload_windows_runtime_dlls()
-start_startup_heartbeat()
+def main() -> None:
+    configure_stdio_utf8()
+    configure_windows_dll_search_path()
+    preload_windows_runtime_dlls()
+    start_startup_heartbeat()
 
-sys.path.insert(0, str(APP_DIR))
+    sys.path.insert(0, str(APP_DIR))
 
-main_file = APP_DIR / "main.py"
-if not main_file.is_file():
-    raise FileNotFoundError(f"Backend entrypoint not found: {main_file}")
+    main_file = APP_DIR / "main.py"
+    if not main_file.is_file():
+        raise FileNotFoundError(f"Backend entrypoint not found: {main_file}")
 
-sys.argv[0] = str(main_file)
-runpy.run_path(str(main_file), run_name="__main__")
+    sys.argv[0] = str(main_file)
+    runpy.run_path(str(main_file), run_name="__main__")
+
+
+if __name__ == "__main__":
+    main()
