@@ -152,48 +152,26 @@ def write_startup_heartbeat(
         return False
 
 
-class StartupHeartbeat:
-    def __init__(self, path: Path, interval_seconds: float) -> None:
-        self._path = path
-        self._interval_seconds = interval_seconds
-        self._stop_event = threading.Event()
-        self._had_successful_write = False
-        self._warning_emitted = False
+def heartbeat_loop(
+    path: Path, interval_seconds: float, stop_event: threading.Event
+) -> None:
+    had_successful_write = False
+    warning_emitted = False
 
-    def _write(self, state: str, *, warn_on_error: bool) -> bool:
-        effective_warn_on_error = warn_on_error and (
-            state == "stopping"
-            or not self._warning_emitted
-            or not self._had_successful_write
-        )
-        ok = write_startup_heartbeat(
-            self._path,
-            state,
-            warn_on_error=effective_warn_on_error,
-        )
+    ok = write_startup_heartbeat(path, "starting", warn_on_error=True)
+    if ok:
+        had_successful_write = True
+    else:
+        warning_emitted = True
+
+    while not stop_event.wait(interval_seconds):
+        warn_now = (not warning_emitted) or (not had_successful_write)
+        ok = write_startup_heartbeat(path, "starting", warn_on_error=warn_now)
         if ok:
-            self._had_successful_write = True
-            self._warning_emitted = False
-        elif effective_warn_on_error:
-            self._warning_emitted = True
-        return ok
-
-    def start(self) -> None:
-        self._write("starting", warn_on_error=True)
-        atexit.register(self.stop)
-        threading.Thread(
-            target=self._loop,
-            name="astrbot-startup-heartbeat",
-            daemon=True,
-        ).start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._write("stopping", warn_on_error=True)
-
-    def _loop(self) -> None:
-        while not self._stop_event.wait(self._interval_seconds):
-            self._write("starting", warn_on_error=True)
+            had_successful_write = True
+            warning_emitted = False
+        elif warn_now:
+            warning_emitted = True
 
 
 def start_startup_heartbeat() -> None:
@@ -201,7 +179,19 @@ def start_startup_heartbeat() -> None:
     if heartbeat_path is None:
         return
 
-    StartupHeartbeat(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS).start()
+    stop_event = threading.Event()
+
+    def on_exit() -> None:
+        stop_event.set()
+        write_startup_heartbeat(heartbeat_path, "stopping", warn_on_error=True)
+
+    atexit.register(on_exit)
+    threading.Thread(
+        target=heartbeat_loop,
+        args=(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS, stop_event),
+        name="astrbot-startup-heartbeat",
+        daemon=True,
+    ).start()
 
 
 def main() -> None:

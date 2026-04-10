@@ -47,8 +47,7 @@ impl BackendState {
         let start_time = Instant::now();
         let mut tcp_ready_logged = false;
         let mut ever_tcp_reachable = false;
-        let mut startup_heartbeat_logged = false;
-        let mut last_startup_heartbeat_at = None;
+        let mut startup_heartbeat_state = StartupHeartbeatTracker::new();
 
         loop {
             let (http_status, tcp_reachable) =
@@ -83,51 +82,19 @@ impl BackendState {
             };
 
             if let Some(heartbeat_path) = readiness.startup_heartbeat_path.as_deref() {
-                match next_startup_heartbeat_at(
-                    last_startup_heartbeat_at,
-                    read_startup_heartbeat_updated_at(heartbeat_path, child_pid),
-                ) {
-                    StartupHeartbeatObservation::Missing => {
-                        last_startup_heartbeat_at = None;
-                    }
-                    StartupHeartbeatObservation::Observed(updated_at) => {
-                        last_startup_heartbeat_at = Some(updated_at);
-                    }
-                    StartupHeartbeatObservation::Invalidated(previous) => {
-                        let heartbeat_age_ms = now
-                            .duration_since(previous)
-                            .ok()
-                            .map(|age| age.as_millis().to_string())
-                            .unwrap_or_else(|| "unknown".to_string());
-                        append_desktop_log(&format!(
-                            "backend startup heartbeat disappeared or became invalid before HTTP dashboard became ready: last_valid_age_ms={heartbeat_age_ms}"
-                        ));
-                        return Err(
-                            "Backend startup heartbeat disappeared or became invalid before HTTP readiness."
-                                .to_string(),
-                        );
-                    }
-                }
-
-                if startup_heartbeat_timestamp_is_fresh(
-                    last_startup_heartbeat_at,
+                match step_startup_heartbeat(
+                    heartbeat_path,
+                    child_pid,
                     now,
                     startup_idle_timeout,
+                    startup_heartbeat_state,
                 ) {
-                    if !startup_heartbeat_logged {
-                        append_desktop_log(
-                            "backend startup heartbeat is fresh while HTTP dashboard is not ready yet; waiting",
-                        );
-                        startup_heartbeat_logged = true;
+                    StartupHeartbeatStep::Continue(next_state) => {
+                        startup_heartbeat_state = next_state;
                     }
-                } else if last_startup_heartbeat_at.is_some() {
-                    append_desktop_log(
-                        "backend startup heartbeat went stale before HTTP dashboard became ready",
-                    );
-                    return Err(format!(
-                        "Backend startup heartbeat went stale after {}ms without HTTP readiness.",
-                        readiness.startup_idle_timeout_ms
-                    ));
+                    StartupHeartbeatStep::Failed(reason) => {
+                        return Err(reason);
+                    }
                 }
             }
 
@@ -151,7 +118,7 @@ impl BackendState {
                             now,
                             last_http_status: http_status,
                             tcp_reachable: ever_tcp_reachable,
-                            last_startup_heartbeat_at,
+                            last_startup_heartbeat_at: startup_heartbeat_state.last_seen_at,
                         },
                     );
                     return Err(format!(
@@ -229,6 +196,26 @@ enum StartupHeartbeatObservation {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct StartupHeartbeatTracker {
+    last_seen_at: Option<SystemTime>,
+    logged_fresh: bool,
+}
+
+impl StartupHeartbeatTracker {
+    fn new() -> Self {
+        Self {
+            last_seen_at: None,
+            logged_fresh: false,
+        }
+    }
+}
+
+enum StartupHeartbeatStep {
+    Continue(StartupHeartbeatTracker),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ReadinessTimeoutSnapshot {
     now: SystemTime,
     last_http_status: Option<u16>,
@@ -270,6 +257,58 @@ fn next_startup_heartbeat_at(
             StartupHeartbeatObservation::Observed(previous)
         }
         (_, Some(current)) => StartupHeartbeatObservation::Observed(current),
+    }
+}
+
+fn step_startup_heartbeat(
+    heartbeat_path: &Path,
+    child_pid: u32,
+    now: SystemTime,
+    idle_timeout: Duration,
+    mut state: StartupHeartbeatTracker,
+) -> StartupHeartbeatStep {
+    match next_startup_heartbeat_at(
+        state.last_seen_at,
+        read_startup_heartbeat_updated_at(heartbeat_path, child_pid),
+    ) {
+        StartupHeartbeatObservation::Missing => {
+            state.last_seen_at = None;
+            StartupHeartbeatStep::Continue(state)
+        }
+        StartupHeartbeatObservation::Observed(updated_at) => {
+            state.last_seen_at = Some(updated_at);
+            if startup_heartbeat_timestamp_is_fresh(state.last_seen_at, now, idle_timeout) {
+                if !state.logged_fresh {
+                    append_desktop_log(
+                        "backend startup heartbeat is fresh while HTTP dashboard is not ready yet; waiting",
+                    );
+                    state.logged_fresh = true;
+                }
+                StartupHeartbeatStep::Continue(state)
+            } else {
+                append_desktop_log(
+                    "backend startup heartbeat went stale before HTTP dashboard became ready",
+                );
+                StartupHeartbeatStep::Failed(format!(
+                    "Backend startup heartbeat went stale after {}ms without HTTP readiness.",
+                    idle_timeout.as_millis()
+                ))
+            }
+        }
+        StartupHeartbeatObservation::Invalidated(previous) => {
+            let heartbeat_age_ms = now
+                .duration_since(previous)
+                .ok()
+                .map(|age| age.as_millis().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            append_desktop_log(&format!(
+                "backend startup heartbeat disappeared or became invalid before HTTP dashboard became ready: last_valid_age_ms={heartbeat_age_ms}"
+            ));
+            StartupHeartbeatStep::Failed(
+                "Backend startup heartbeat disappeared or became invalid before HTTP readiness."
+                    .to_string(),
+            )
+        }
     }
 }
 

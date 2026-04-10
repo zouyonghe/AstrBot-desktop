@@ -14,15 +14,15 @@ SPEC.loader.exec_module(launch_backend)
 
 class StartupHeartbeatTests(unittest.TestCase):
     def test_repeated_failures_warn_before_first_success(self) -> None:
-        heartbeat = launch_backend.StartupHeartbeat(Path("/tmp/heartbeat.json"), 2.0)
+        stop_event = mock.Mock()
+        stop_event.wait.side_effect = [False, True]
 
         with mock.patch.object(
             launch_backend,
             "write_startup_heartbeat",
             side_effect=[False, False],
         ) as write_mock:
-            heartbeat._write("starting", warn_on_error=True)
-            heartbeat._write("starting", warn_on_error=True)
+            launch_backend.heartbeat_loop(Path("/tmp/heartbeat.json"), 2.0, stop_event)
 
         self.assertEqual(
             [call.kwargs["warn_on_error"] for call in write_mock.call_args_list],
@@ -30,16 +30,15 @@ class StartupHeartbeatTests(unittest.TestCase):
         )
 
     def test_repeated_failures_after_success_are_suppressed(self) -> None:
-        heartbeat = launch_backend.StartupHeartbeat(Path("/tmp/heartbeat.json"), 2.0)
+        stop_event = mock.Mock()
+        stop_event.wait.side_effect = [False, False, True]
 
         with mock.patch.object(
             launch_backend,
             "write_startup_heartbeat",
             side_effect=[True, False, False],
         ) as write_mock:
-            heartbeat._write("starting", warn_on_error=True)
-            heartbeat._write("starting", warn_on_error=True)
-            heartbeat._write("starting", warn_on_error=True)
+            launch_backend.heartbeat_loop(Path("/tmp/heartbeat.json"), 2.0, stop_event)
 
         self.assertEqual(
             [call.kwargs["warn_on_error"] for call in write_mock.call_args_list],
@@ -47,23 +46,40 @@ class StartupHeartbeatTests(unittest.TestCase):
         )
 
     def test_stop_failure_still_warns_after_earlier_failure(self) -> None:
-        heartbeat = launch_backend.StartupHeartbeat(Path("/tmp/heartbeat.json"), 2.0)
+        stop_event = mock.Mock()
+        thread = mock.Mock()
+        register = mock.Mock()
 
         with mock.patch.object(
             launch_backend,
             "write_startup_heartbeat",
-            side_effect=[False, False],
+            return_value=False,
         ) as write_mock:
-            heartbeat._write("starting", warn_on_error=True)
-            heartbeat.stop()
+            with mock.patch.object(
+                launch_backend,
+                "resolve_startup_heartbeat_path",
+                return_value=Path("/tmp/heartbeat.json"),
+            ):
+                with mock.patch.object(
+                    launch_backend.threading, "Event", return_value=stop_event
+                ):
+                    with mock.patch.object(
+                        launch_backend.threading, "Thread", return_value=thread
+                    ):
+                        with mock.patch.object(
+                            launch_backend.atexit, "register", register
+                        ):
+                            launch_backend.start_startup_heartbeat()
+                            on_exit = register.call_args.args[0]
+                            on_exit()
 
         self.assertEqual(
             [call.args[1] for call in write_mock.call_args_list],
-            ["starting", "stopping"],
+            ["stopping"],
         )
         self.assertEqual(
             [call.kwargs["warn_on_error"] for call in write_mock.call_args_list],
-            [True, True],
+            [True],
         )
 
 
