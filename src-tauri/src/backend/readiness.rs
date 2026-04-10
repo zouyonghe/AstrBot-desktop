@@ -57,45 +57,16 @@ impl BackendState {
             }
             let now = SystemTime::now();
 
-            let child_pid = {
-                let mut guard = self
-                    .child
-                    .lock()
-                    .map_err(|_| "Backend process lock poisoned.".to_string())?;
-                if let Some(child) = guard.as_mut() {
-                    let child_pid = child.id();
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            *guard = None;
-                            return Err(format!(
-                                "Backend process exited before becoming reachable: {status}"
-                            ));
-                        }
-                        Ok(None) => child_pid,
-                        Err(error) => {
-                            return Err(format!("Failed to poll backend process status: {error}"));
-                        }
-                    }
-                } else {
-                    return Err("Backend process is not running.".to_string());
-                }
-            };
+            let child_pid = self.child_pid_or_error()?;
 
             if let Some(heartbeat_path) = readiness.startup_heartbeat_path.as_deref() {
-                match step_startup_heartbeat(
+                step_startup_heartbeat(
                     heartbeat_path,
                     child_pid,
                     now,
                     startup_idle_timeout,
-                    startup_heartbeat_state,
-                ) {
-                    StartupHeartbeatStep::Continue(next_state) => {
-                        startup_heartbeat_state = next_state;
-                    }
-                    StartupHeartbeatStep::Failed(reason) => {
-                        return Err(reason);
-                    }
-                }
+                    &mut startup_heartbeat_state,
+                )?;
             }
 
             if tcp_reachable {
@@ -112,14 +83,11 @@ impl BackendState {
                 if start_time.elapsed() >= limit {
                     self.log_backend_readiness_timeout(
                         limit,
-                        &readiness.path,
-                        readiness.probe_timeout_ms,
-                        ReadinessTimeoutSnapshot {
-                            now,
-                            last_http_status: http_status,
-                            tcp_reachable: ever_tcp_reachable,
-                            last_startup_heartbeat_at: startup_heartbeat_state.last_seen_at,
-                        },
+                        &readiness,
+                        now,
+                        http_status,
+                        ever_tcp_reachable,
+                        startup_heartbeat_state.last_seen_at,
                     );
                     return Err(format!(
                         "Timed out after {}ms waiting for backend startup.",
@@ -144,29 +112,51 @@ impl BackendState {
         (http_status, tcp_reachable)
     }
 
+    fn child_pid_or_error(&self) -> Result<u32, String> {
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "Backend process lock poisoned.".to_string())?;
+        if let Some(child) = guard.as_mut() {
+            let pid = child.id();
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    *guard = None;
+                    Err(format!(
+                        "Backend process exited before becoming reachable: {status}"
+                    ))
+                }
+                Ok(None) => Ok(pid),
+                Err(error) => Err(format!("Failed to poll backend process status: {error}")),
+            }
+        } else {
+            Err("Backend process is not running.".to_string())
+        }
+    }
+
     fn log_backend_readiness_timeout(
         &self,
         timeout: Duration,
-        ready_http_path: &str,
-        probe_timeout_ms: u64,
-        snapshot: ReadinessTimeoutSnapshot,
+        readiness: &backend::config::BackendReadinessConfig,
+        now: SystemTime,
+        last_http_status: Option<u16>,
+        tcp_reachable: bool,
+        last_startup_heartbeat_at: Option<SystemTime>,
     ) {
-        let last_http_status_text = snapshot
-            .last_http_status
+        let last_http_status_text = last_http_status
             .map(|status| status.to_string())
             .unwrap_or_else(|| "none".to_string());
-        let startup_heartbeat_age_ms = snapshot
-            .last_startup_heartbeat_at
-            .and_then(|updated_at| snapshot.now.duration_since(updated_at).ok())
+        let startup_heartbeat_age_ms = last_startup_heartbeat_at
+            .and_then(|updated_at| now.duration_since(updated_at).ok())
             .map(|age| age.as_millis().to_string())
             .unwrap_or_else(|| "none".to_string());
         append_desktop_log(&format!(
             "backend HTTP readiness check timed out after {}ms: backend_url={}, path={}, probe_timeout_ms={}, tcp_reachable={}, last_http_status={}, startup_heartbeat_age_ms={}",
             timeout.as_millis(),
             self.backend_url,
-            ready_http_path,
-            probe_timeout_ms,
-            snapshot.tcp_reachable,
+            readiness.path,
+            readiness.probe_timeout_ms,
+            tcp_reachable,
             last_http_status_text,
             startup_heartbeat_age_ms
         ));
@@ -188,13 +178,6 @@ enum StartupHeartbeatState {
     Stopping,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StartupHeartbeatObservation {
-    Missing,
-    Observed(SystemTime),
-    Invalidated(SystemTime),
-}
-
 #[derive(Debug, Clone, Copy)]
 struct StartupHeartbeatTracker {
     last_seen_at: Option<SystemTime>,
@@ -210,30 +193,13 @@ impl StartupHeartbeatTracker {
     }
 }
 
-enum StartupHeartbeatStep {
-    Continue(StartupHeartbeatTracker),
-    Failed(String),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ReadinessTimeoutSnapshot {
-    now: SystemTime,
-    last_http_status: Option<u16>,
-    tcp_reachable: bool,
-    last_startup_heartbeat_at: Option<SystemTime>,
-}
-
 fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<SystemTime> {
     let payload = fs::read_to_string(path).ok()?;
     let heartbeat: StartupHeartbeatFile = serde_json::from_str(&payload).ok()?;
     if heartbeat.pid != expected_pid || heartbeat.state != StartupHeartbeatState::Starting {
         return None;
     }
-    heartbeat_updated_at_ms_to_system_time(heartbeat.updated_at_ms)
-}
-
-fn heartbeat_updated_at_ms_to_system_time(updated_at_ms: u64) -> Option<SystemTime> {
-    UNIX_EPOCH.checked_add(Duration::from_millis(updated_at_ms))
+    UNIX_EPOCH.checked_add(Duration::from_millis(heartbeat.updated_at_ms))
 }
 
 fn startup_heartbeat_timestamp_is_fresh(
@@ -246,56 +212,18 @@ fn startup_heartbeat_timestamp_is_fresh(
         .is_some_and(|age| age <= max_age)
 }
 
-fn next_startup_heartbeat_at(
-    previous: Option<SystemTime>,
-    current: Option<SystemTime>,
-) -> StartupHeartbeatObservation {
-    match (previous, current) {
-        (Some(previous), None) => StartupHeartbeatObservation::Invalidated(previous),
-        (None, None) => StartupHeartbeatObservation::Missing,
-        (Some(previous), Some(current)) if current <= previous => {
-            StartupHeartbeatObservation::Observed(previous)
-        }
-        (_, Some(current)) => StartupHeartbeatObservation::Observed(current),
-    }
-}
-
 fn step_startup_heartbeat(
     heartbeat_path: &Path,
     child_pid: u32,
     now: SystemTime,
     idle_timeout: Duration,
-    mut state: StartupHeartbeatTracker,
-) -> StartupHeartbeatStep {
-    match next_startup_heartbeat_at(
-        state.last_seen_at,
-        read_startup_heartbeat_updated_at(heartbeat_path, child_pid),
-    ) {
-        StartupHeartbeatObservation::Missing => {
-            state.last_seen_at = None;
-            StartupHeartbeatStep::Continue(state)
-        }
-        StartupHeartbeatObservation::Observed(updated_at) => {
-            state.last_seen_at = Some(updated_at);
-            if startup_heartbeat_timestamp_is_fresh(state.last_seen_at, now, idle_timeout) {
-                if !state.logged_fresh {
-                    append_desktop_log(
-                        "backend startup heartbeat is fresh while HTTP dashboard is not ready yet; waiting",
-                    );
-                    state.logged_fresh = true;
-                }
-                StartupHeartbeatStep::Continue(state)
-            } else {
-                append_desktop_log(
-                    "backend startup heartbeat went stale before HTTP dashboard became ready",
-                );
-                StartupHeartbeatStep::Failed(format!(
-                    "Backend startup heartbeat went stale after {}ms without HTTP readiness.",
-                    idle_timeout.as_millis()
-                ))
-            }
-        }
-        StartupHeartbeatObservation::Invalidated(previous) => {
+    state: &mut StartupHeartbeatTracker,
+) -> Result<(), String> {
+    let previous = state.last_seen_at;
+    let current = read_startup_heartbeat_updated_at(heartbeat_path, child_pid);
+
+    match (previous, current) {
+        (Some(previous), None) => {
             let heartbeat_age_ms = now
                 .duration_since(previous)
                 .ok()
@@ -304,10 +232,38 @@ fn step_startup_heartbeat(
             append_desktop_log(&format!(
                 "backend startup heartbeat disappeared or became invalid before HTTP dashboard became ready: last_valid_age_ms={heartbeat_age_ms}"
             ));
-            StartupHeartbeatStep::Failed(
+            Err(
                 "Backend startup heartbeat disappeared or became invalid before HTTP readiness."
                     .to_string(),
             )
+        }
+        (None, None) => {
+            state.last_seen_at = None;
+            Ok(())
+        }
+        (_, Some(current)) => {
+            let updated_at = match previous {
+                Some(previous) if current <= previous => previous,
+                _ => current,
+            };
+            state.last_seen_at = Some(updated_at);
+            if startup_heartbeat_timestamp_is_fresh(state.last_seen_at, now, idle_timeout) {
+                if !state.logged_fresh {
+                    append_desktop_log(
+                        "backend startup heartbeat is fresh while HTTP dashboard is not ready yet; waiting",
+                    );
+                    state.logged_fresh = true;
+                }
+                Ok(())
+            } else {
+                append_desktop_log(
+                    "backend startup heartbeat went stale before HTTP dashboard became ready",
+                );
+                Err(format!(
+                    "Backend startup heartbeat went stale after {}ms without HTTP readiness.",
+                    idle_timeout.as_millis()
+                ))
+            }
         }
     }
 }
@@ -383,10 +339,28 @@ mod tests {
     }
 
     #[test]
-    fn next_startup_heartbeat_at_marks_previous_timestamp_invalid_when_current_is_missing() {
+    fn step_startup_heartbeat_fails_when_existing_heartbeat_disappears() {
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let heartbeat_path = temp_dir.path().join("missing-startup-heartbeat.json");
+        let mut tracker = StartupHeartbeatTracker {
+            last_seen_at: Some(UNIX_EPOCH + Duration::from_millis(5000)),
+            logged_fresh: false,
+        };
+
+        let result = step_startup_heartbeat(
+            &heartbeat_path,
+            42,
+            UNIX_EPOCH + Duration::from_millis(5500),
+            Duration::from_secs(1),
+            &mut tracker,
+        );
+
         assert_eq!(
-            next_startup_heartbeat_at(Some(UNIX_EPOCH + Duration::from_millis(5000)), None),
-            StartupHeartbeatObservation::Invalidated(UNIX_EPOCH + Duration::from_millis(5000))
+            result,
+            Err(
+                "Backend startup heartbeat disappeared or became invalid before HTTP readiness."
+                    .to_string()
+            )
         );
     }
 
@@ -407,9 +381,20 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_updated_at_ms_to_system_time_matches_checked_add() {
+    fn read_startup_heartbeat_updated_at_handles_large_timestamp_without_panic() {
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let heartbeat_path = temp_dir.path().join("startup-heartbeat.json");
+        std::fs::write(
+            &heartbeat_path,
+            format!(
+                r#"{{"pid":42,"state":"starting","updated_at_ms":{}}}"#,
+                u64::MAX
+            ),
+        )
+        .expect("write heartbeat file");
+
         assert_eq!(
-            heartbeat_updated_at_ms_to_system_time(u64::MAX),
+            read_startup_heartbeat_updated_at(&heartbeat_path, 42),
             UNIX_EPOCH.checked_add(Duration::from_millis(u64::MAX))
         );
     }
