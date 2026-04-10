@@ -126,22 +126,29 @@ def resolve_startup_heartbeat_path() -> Path | None:
     return Path(raw)
 
 
+def build_heartbeat_payload(state: str) -> dict[str, object]:
+    return {
+        "pid": os.getpid(),
+        "state": state,
+        "updated_at_ms": int(time.time() * 1000),
+    }
+
+
+def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    temp_path = path.with_name(f"{path.name}.tmp")
+    temp_path.write_text(
+        json.dumps(payload, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
 def write_startup_heartbeat(
     path: Path, state: str, *, warn_on_error: bool = False
 ) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "pid": os.getpid(),
-            "state": state,
-            "updated_at_ms": int(time.time() * 1000),
-        }
-        temp_path = path.with_name(f"{path.name}.tmp")
-        temp_path.write_text(
-            json.dumps(payload, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        temp_path.replace(path)
+        atomic_write_json(path, build_heartbeat_payload(state))
         return True
     except Exception as exc:
         if warn_on_error:
@@ -155,23 +162,28 @@ def write_startup_heartbeat(
 def heartbeat_loop(
     path: Path, interval_seconds: float, stop_event: threading.Event
 ) -> None:
+    # At least one successful write has happened.
     had_successful_write = False
-    warning_emitted = False
+    # A warning has already been emitted since the last successful write.
+    warning_emitted_since_last_success = False
+
+    def should_warn() -> bool:
+        return (not had_successful_write) or (not warning_emitted_since_last_success)
 
     ok = write_startup_heartbeat(path, "starting", warn_on_error=True)
     if ok:
         had_successful_write = True
     else:
-        warning_emitted = True
+        warning_emitted_since_last_success = True
 
     while not stop_event.wait(interval_seconds):
-        warn_now = (not warning_emitted) or (not had_successful_write)
+        warn_now = should_warn()
         ok = write_startup_heartbeat(path, "starting", warn_on_error=warn_now)
         if ok:
             had_successful_write = True
-            warning_emitted = False
+            warning_emitted_since_last_success = False
         elif warn_now:
-            warning_emitted = True
+            warning_emitted_since_last_success = True
 
 
 def start_startup_heartbeat() -> None:
