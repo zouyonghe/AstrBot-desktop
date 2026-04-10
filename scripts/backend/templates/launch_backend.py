@@ -16,6 +16,7 @@ _WINDOWS_DLL_DIRECTORY_HANDLES: list[object] = []
 # Keep this in sync with BACKEND_STARTUP_HEARTBEAT_PATH_ENV in src-tauri/src/app_constants.rs.
 STARTUP_HEARTBEAT_ENV = "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH"
 STARTUP_HEARTBEAT_INTERVAL_SECONDS = 2.0
+STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS = 1.0
 
 
 def configure_stdio_utf8() -> None:
@@ -196,18 +197,20 @@ def start_startup_heartbeat() -> None:
         return
 
     stop_event = threading.Event()
-
-    def on_exit() -> None:
-        stop_event.set()
-        write_startup_heartbeat(heartbeat_path, "stopping", warn_on_error=True)
-
-    atexit.register(on_exit)
-    threading.Thread(
+    thread = threading.Thread(
         target=heartbeat_loop,
         args=(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS, stop_event),
         name="astrbot-startup-heartbeat",
         daemon=True,
-    ).start()
+    )
+
+    def on_exit() -> None:
+        stop_event.set()
+        thread.join(timeout=STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS)
+        write_startup_heartbeat(heartbeat_path, "stopping", warn_on_error=True)
+
+    atexit.register(on_exit)
+    thread.start()
 
 
 def main() -> None:

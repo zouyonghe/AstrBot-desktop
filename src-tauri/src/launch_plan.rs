@@ -40,7 +40,7 @@ pub fn resolve_custom_launch(custom_cmd: String) -> Result<LaunchPlan, String> {
         .ok()
         .or_else(runtime_paths::detect_astrbot_source_root)
         .unwrap_or_else(runtime_paths::workspace_root_dir);
-    let root_dir = env::var("ASTRBOT_ROOT").ok().map(PathBuf::from);
+    let root_dir = env::var(crate::ASTRBOT_ROOT_ENV).ok().map(PathBuf::from);
     let webui_dir = env::var("ASTRBOT_WEBUI_DIR").ok().map(PathBuf::from);
     let startup_heartbeat_path = resolve_launch_startup_heartbeat_path(root_dir.as_deref(), false);
 
@@ -122,7 +122,7 @@ where
         ));
     }
 
-    let root_dir = env::var("ASTRBOT_ROOT")
+    let root_dir = env::var(crate::ASTRBOT_ROOT_ENV)
         .map(PathBuf::from)
         .ok()
         .or_else(runtime_paths::default_packaged_root_dir);
@@ -191,7 +191,7 @@ pub fn resolve_dev_launch() -> Result<LaunchPlan, String> {
         args.push("--webui-dir".to_string());
         args.push(path.to_string_lossy().to_string());
     }
-    let root_dir = env::var("ASTRBOT_ROOT").ok().map(PathBuf::from);
+    let root_dir = env::var(crate::ASTRBOT_ROOT_ENV).ok().map(PathBuf::from);
     let startup_heartbeat_path = resolve_launch_startup_heartbeat_path(root_dir.as_deref(), false);
 
     Ok(LaunchPlan {
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn resolve_custom_launch_sets_startup_heartbeat_path_from_root_dir() {
-        let _root_guard = EnvVarGuard::set("ASTRBOT_ROOT", "/tmp/astrbot-root");
+        let _root_guard = EnvVarGuard::set(crate::ASTRBOT_ROOT_ENV, "/tmp/astrbot-root");
 
         let plan = resolve_custom_launch("python main.py".to_string()).expect("custom plan");
 

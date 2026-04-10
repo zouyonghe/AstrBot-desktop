@@ -70,9 +70,13 @@ class StartupHeartbeatTests(unittest.TestCase):
                             launch_backend.atexit, "register", register
                         ):
                             launch_backend.start_startup_heartbeat()
+                            thread.join.assert_not_called()
                             on_exit = register.call_args.args[0]
                             on_exit()
 
+        thread.join.assert_called_once_with(
+            timeout=launch_backend.STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS
+        )
         self.assertEqual(
             [call.args[1] for call in write_mock.call_args_list],
             ["stopping"],

@@ -131,7 +131,7 @@ pub fn resolve_backend_startup_heartbeat_path(
         return Some(root.join(trimmed));
     }
 
-    if let Ok(root) = env::var("ASTRBOT_ROOT") {
+    if let Ok(root) = env::var(crate::ASTRBOT_ROOT_ENV) {
         let root = PathBuf::from(root.trim());
         if !root.as_os_str().is_empty() {
             return Some(root.join(trimmed));

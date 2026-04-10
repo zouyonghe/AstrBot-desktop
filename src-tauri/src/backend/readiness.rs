@@ -57,8 +57,7 @@ impl BackendState {
             }
             let now = SystemTime::now();
 
-            self.ensure_child_alive()?;
-            let child_pid = self.child_pid()?;
+            let child_pid = self.live_child_pid()?;
 
             if let Some(heartbeat_path) = readiness.startup_heartbeat_path.as_deref() {
                 step_startup_heartbeat(
@@ -113,25 +112,14 @@ impl BackendState {
         (http_status, tcp_reachable)
     }
 
-    fn child_pid(&self) -> Result<u32, String> {
-        let guard = self
-            .child
-            .lock()
-            .map_err(|_| "Backend process lock poisoned.".to_string())?;
-
-        guard
-            .as_ref()
-            .map(|child| child.id())
-            .ok_or_else(|| "Backend process is not running.".to_string())
-    }
-
-    fn ensure_child_alive(&self) -> Result<(), String> {
+    fn live_child_pid(&self) -> Result<u32, String> {
         let mut guard = self
             .child
             .lock()
             .map_err(|_| "Backend process lock poisoned.".to_string())?;
 
         if let Some(child) = guard.as_mut() {
+            let pid = child.id();
             match child.try_wait() {
                 Ok(Some(status)) => {
                     *guard = None;
@@ -139,7 +127,7 @@ impl BackendState {
                         "Backend process exited before becoming reachable: {status}"
                     ))
                 }
-                Ok(None) => Ok(()),
+                Ok(None) => Ok(pid),
                 Err(error) => Err(format!("Failed to poll backend process status: {error}")),
             }
         } else {
@@ -159,10 +147,7 @@ impl BackendState {
         let last_http_status_text = last_http_status
             .map(|status| status.to_string())
             .unwrap_or_else(|| "none".to_string());
-        let startup_heartbeat_age_ms = last_startup_heartbeat_at
-            .and_then(|updated_at| ms_since(updated_at, now))
-            .map(|age| age.to_string())
-            .unwrap_or_else(|| "none".to_string());
+        let startup_heartbeat_age_ms = describe_heartbeat_age(last_startup_heartbeat_at, now);
         append_desktop_log(&format!(
             "backend HTTP readiness check timed out after {}ms: backend_url={}, path={}, probe_timeout_ms={}, tcp_reachable={}, last_http_status={}, startup_heartbeat_age_ms={}",
             timeout.as_millis(),
@@ -229,6 +214,19 @@ fn ms_since(earlier: SystemTime, now: SystemTime) -> Option<u128> {
     now.duration_since(earlier)
         .ok()
         .map(|duration| duration.as_millis())
+}
+
+fn describe_heartbeat_age(
+    last_startup_heartbeat_at: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
+    match last_startup_heartbeat_at {
+        Some(updated_at) => match ms_since(updated_at, now) {
+            Some(age) => age.to_string(),
+            None => format!("future ({updated_at:?})"),
+        },
+        None => "none".to_string(),
+    }
 }
 
 fn step_startup_heartbeat(
@@ -410,6 +408,21 @@ mod tests {
         assert_eq!(
             read_startup_heartbeat_updated_at(&heartbeat_path, 42),
             UNIX_EPOCH.checked_add(Duration::from_millis(u64::MAX))
+        );
+    }
+
+    #[test]
+    fn describe_heartbeat_age_distinguishes_future_timestamp_from_missing() {
+        assert_eq!(
+            describe_heartbeat_age(
+                Some(UNIX_EPOCH + Duration::from_millis(6_000)),
+                UNIX_EPOCH + Duration::from_millis(5_500)
+            ),
+            format!("future ({:?})", UNIX_EPOCH + Duration::from_millis(6_000))
+        );
+        assert_eq!(
+            describe_heartbeat_age(None, UNIX_EPOCH + Duration::from_millis(5_500)),
+            "none"
         );
     }
 }

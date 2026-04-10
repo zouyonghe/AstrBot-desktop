@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 pub(crate) const DEFAULT_BACKEND_URL: &str = "http://127.0.0.1:6185/";
+pub(crate) const ASTRBOT_ROOT_ENV: &str = "ASTRBOT_ROOT";
 pub(crate) const BACKEND_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_TIMEOUT_MS";
 pub(crate) const PACKAGED_BACKEND_TIMEOUT_FALLBACK_MS: u64 = 15 * 60 * 1000;
 pub(crate) const GRACEFUL_RESTART_REQUEST_TIMEOUT_MS: u64 = 2_500;
