@@ -82,16 +82,10 @@ impl BackendState {
             };
 
             if let Some(heartbeat_path) = readiness.startup_heartbeat_path.as_deref() {
-                if let Some(updated_at) =
-                    read_startup_heartbeat_updated_at(heartbeat_path, child_pid)
-                {
-                    if last_startup_heartbeat_at
-                        .map(|last_seen| updated_at > last_seen)
-                        .unwrap_or(true)
-                    {
-                        last_startup_heartbeat_at = Some(updated_at);
-                    }
-                }
+                last_startup_heartbeat_at = next_startup_heartbeat_at(
+                    last_startup_heartbeat_at,
+                    read_startup_heartbeat_updated_at(heartbeat_path, child_pid),
+                );
 
                 if startup_heartbeat_timestamp_is_fresh(
                     last_startup_heartbeat_at,
@@ -209,21 +203,19 @@ fn startup_heartbeat_timestamp_is_fresh(
     max_age: Duration,
 ) -> bool {
     updated_at
-        .map(|updated_at| now.duration_since(updated_at).unwrap_or(Duration::ZERO))
+        .and_then(|updated_at| now.duration_since(updated_at).ok())
         .is_some_and(|age| age <= max_age)
 }
 
-fn startup_heartbeat_is_fresh(
-    path: &Path,
-    expected_pid: u32,
-    now: SystemTime,
-    max_age: Duration,
-) -> bool {
-    startup_heartbeat_timestamp_is_fresh(
-        read_startup_heartbeat_updated_at(path, expected_pid),
-        now,
-        max_age,
-    )
+fn next_startup_heartbeat_at(
+    previous: Option<SystemTime>,
+    current: Option<SystemTime>,
+) -> Option<SystemTime> {
+    match (previous, current) {
+        (_, None) => None,
+        (Some(previous), Some(current)) if current <= previous => Some(previous),
+        (_, Some(current)) => Some(current),
+    }
 }
 
 #[cfg(test)]
@@ -244,9 +236,11 @@ mod tests {
         )
         .expect("write heartbeat file");
 
-        assert!(startup_heartbeat_is_fresh(
-            &heartbeat_path,
-            42,
+        let updated_at =
+            read_startup_heartbeat_updated_at(&heartbeat_path, 42).expect("heartbeat timestamp");
+
+        assert!(startup_heartbeat_timestamp_is_fresh(
+            Some(updated_at),
             UNIX_EPOCH + Duration::from_millis(5500),
             Duration::from_secs(1),
         ));
@@ -262,9 +256,11 @@ mod tests {
         )
         .expect("write heartbeat file");
 
-        assert!(!startup_heartbeat_is_fresh(
-            &heartbeat_path,
-            42,
+        let updated_at =
+            read_startup_heartbeat_updated_at(&heartbeat_path, 42).expect("heartbeat timestamp");
+
+        assert!(!startup_heartbeat_timestamp_is_fresh(
+            Some(updated_at),
             SystemTime::UNIX_EPOCH + Duration::from_millis(5000),
             Duration::from_secs(1),
         ));
@@ -280,11 +276,23 @@ mod tests {
         )
         .expect("write heartbeat file");
 
-        assert!(!startup_heartbeat_is_fresh(
-            &heartbeat_path,
-            42,
+        assert_eq!(read_startup_heartbeat_updated_at(&heartbeat_path, 42), None);
+    }
+
+    #[test]
+    fn startup_heartbeat_is_not_fresh_for_future_timestamp() {
+        assert!(!startup_heartbeat_timestamp_is_fresh(
+            Some(UNIX_EPOCH + Duration::from_millis(6000)),
             UNIX_EPOCH + Duration::from_millis(5500),
             Duration::from_secs(1),
         ));
+    }
+
+    #[test]
+    fn next_startup_heartbeat_at_clears_previous_timestamp_when_current_is_invalid() {
+        assert_eq!(
+            next_startup_heartbeat_at(Some(UNIX_EPOCH + Duration::from_millis(5000)), None),
+            None
+        );
     }
 }
