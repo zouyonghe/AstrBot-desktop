@@ -56,6 +56,7 @@ impl BackendState {
             if matches!(http_status, Some(status_code) if (200..400).contains(&status_code)) {
                 return Ok(());
             }
+            let now = SystemTime::now();
 
             let child_pid = {
                 let mut guard = self
@@ -93,7 +94,7 @@ impl BackendState {
                         last_startup_heartbeat_at = Some(updated_at);
                     }
                     StartupHeartbeatObservation::Invalidated(previous) => {
-                        let heartbeat_age_ms = SystemTime::now()
+                        let heartbeat_age_ms = now
                             .duration_since(previous)
                             .ok()
                             .map(|age| age.as_millis().to_string())
@@ -110,7 +111,7 @@ impl BackendState {
 
                 if startup_heartbeat_timestamp_is_fresh(
                     last_startup_heartbeat_at,
-                    SystemTime::now(),
+                    now,
                     startup_idle_timeout,
                 ) {
                     if !startup_heartbeat_logged {
@@ -146,9 +147,12 @@ impl BackendState {
                         limit,
                         &readiness.path,
                         readiness.probe_timeout_ms,
-                        http_status,
-                        ever_tcp_reachable,
-                        last_startup_heartbeat_at,
+                        ReadinessTimeoutSnapshot {
+                            now,
+                            last_http_status: http_status,
+                            tcp_reachable: ever_tcp_reachable,
+                            last_startup_heartbeat_at,
+                        },
                     );
                     return Err(format!(
                         "Timed out after {}ms waiting for backend startup.",
@@ -178,15 +182,15 @@ impl BackendState {
         timeout: Duration,
         ready_http_path: &str,
         probe_timeout_ms: u64,
-        last_http_status: Option<u16>,
-        tcp_reachable: bool,
-        last_startup_heartbeat_at: Option<SystemTime>,
+        snapshot: ReadinessTimeoutSnapshot,
     ) {
-        let last_http_status_text = last_http_status
+        let last_http_status_text = snapshot
+            .last_http_status
             .map(|status| status.to_string())
             .unwrap_or_else(|| "none".to_string());
-        let startup_heartbeat_age_ms = last_startup_heartbeat_at
-            .and_then(|updated_at| SystemTime::now().duration_since(updated_at).ok())
+        let startup_heartbeat_age_ms = snapshot
+            .last_startup_heartbeat_at
+            .and_then(|updated_at| snapshot.now.duration_since(updated_at).ok())
             .map(|age| age.as_millis().to_string())
             .unwrap_or_else(|| "none".to_string());
         append_desktop_log(&format!(
@@ -195,7 +199,7 @@ impl BackendState {
             self.backend_url,
             ready_http_path,
             probe_timeout_ms,
-            tcp_reachable,
+            snapshot.tcp_reachable,
             last_http_status_text,
             startup_heartbeat_age_ms
         ));
@@ -203,6 +207,7 @@ impl BackendState {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StartupHeartbeatFile {
     pid: u32,
     state: StartupHeartbeatState,
@@ -223,13 +228,25 @@ enum StartupHeartbeatObservation {
     Invalidated(SystemTime),
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ReadinessTimeoutSnapshot {
+    now: SystemTime,
+    last_http_status: Option<u16>,
+    tcp_reachable: bool,
+    last_startup_heartbeat_at: Option<SystemTime>,
+}
+
 fn read_startup_heartbeat_updated_at(path: &Path, expected_pid: u32) -> Option<SystemTime> {
     let payload = fs::read_to_string(path).ok()?;
     let heartbeat: StartupHeartbeatFile = serde_json::from_str(&payload).ok()?;
     if heartbeat.pid != expected_pid || heartbeat.state != StartupHeartbeatState::Starting {
         return None;
     }
-    Some(UNIX_EPOCH + Duration::from_millis(heartbeat.updated_at_ms))
+    heartbeat_updated_at_ms_to_system_time(heartbeat.updated_at_ms)
+}
+
+fn heartbeat_updated_at_ms_to_system_time(updated_at_ms: u64) -> Option<SystemTime> {
+    UNIX_EPOCH.checked_add(Duration::from_millis(updated_at_ms))
 }
 
 fn startup_heartbeat_timestamp_is_fresh(
@@ -340,5 +357,21 @@ mod tests {
             r#"{"pid":42,"state":"unexpected","updated_at_ms":5000}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn startup_heartbeat_file_rejects_unknown_fields() {
+        assert!(serde_json::from_str::<StartupHeartbeatFile>(
+            r#"{"pid":42,"state":"starting","updated_at_ms":5000,"unexpected":true}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn heartbeat_updated_at_ms_to_system_time_matches_checked_add() {
+        assert_eq!(
+            heartbeat_updated_at_ms_to_system_time(u64::MAX),
+            UNIX_EPOCH.checked_add(Duration::from_millis(u64::MAX))
+        );
     }
 }

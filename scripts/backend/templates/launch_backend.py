@@ -152,41 +152,47 @@ def write_startup_heartbeat(
         return False
 
 
+class StartupHeartbeat:
+    def __init__(self, path: Path, interval_seconds: float) -> None:
+        self._path = path
+        self._interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._warning_emitted = False
+
+    def _write(self, state: str, *, warn_on_error: bool) -> bool:
+        ok = write_startup_heartbeat(
+            self._path,
+            state,
+            warn_on_error=warn_on_error,
+        )
+        if not ok:
+            self._warning_emitted = True
+        return ok
+
+    def start(self) -> None:
+        self._write("starting", warn_on_error=True)
+        atexit.register(self.stop)
+        threading.Thread(
+            target=self._loop,
+            name="astrbot-startup-heartbeat",
+            daemon=True,
+        ).start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._write("stopping", warn_on_error=not self._warning_emitted)
+
+    def _loop(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            self._write("starting", warn_on_error=not self._warning_emitted)
+
+
 def start_startup_heartbeat() -> None:
     heartbeat_path = resolve_startup_heartbeat_path()
     if heartbeat_path is None:
         return
 
-    stop_event = threading.Event()
-    warning_emitted = not write_startup_heartbeat(
-        heartbeat_path,
-        "starting",
-        warn_on_error=True,
-    )
-
-    def refresh_heartbeat(state: str) -> None:
-        nonlocal warning_emitted
-        if not write_startup_heartbeat(
-            heartbeat_path,
-            state,
-            warn_on_error=not warning_emitted,
-        ):
-            warning_emitted = True
-
-    def stop_heartbeat() -> None:
-        stop_event.set()
-        refresh_heartbeat("stopping")
-
-    def heartbeat_loop() -> None:
-        while not stop_event.wait(STARTUP_HEARTBEAT_INTERVAL_SECONDS):
-            refresh_heartbeat("starting")
-
-    atexit.register(stop_heartbeat)
-    threading.Thread(
-        target=heartbeat_loop,
-        name="astrbot-startup-heartbeat",
-        daemon=True,
-    ).start()
+    StartupHeartbeat(heartbeat_path, STARTUP_HEARTBEAT_INTERVAL_SECONDS).start()
 
 
 configure_stdio_utf8()
