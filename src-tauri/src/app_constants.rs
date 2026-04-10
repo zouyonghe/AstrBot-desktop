@@ -21,6 +21,7 @@ pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_ENV: &str = "ASTRBOT_BACKEND_START
 pub(crate) const DEFAULT_BACKEND_STARTUP_IDLE_TIMEOUT_MS: u64 = 60 * 1000;
 pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_MIN_MS: u64 = 5_000;
 pub(crate) const BACKEND_STARTUP_IDLE_TIMEOUT_MAX_MS: u64 = 15 * 60 * 1000;
+// Keep this in sync with STARTUP_HEARTBEAT_ENV in scripts/backend/templates/launch_backend.py.
 pub(crate) const BACKEND_STARTUP_HEARTBEAT_PATH_ENV: &str =
     "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH";
 pub(crate) const DEFAULT_BACKEND_STARTUP_HEARTBEAT_RELATIVE_PATH: &str =

@@ -124,6 +124,9 @@ pub fn resolve_backend_startup_heartbeat_path(
         return None;
     }
 
+    // Prefer the launch plan's resolved root so spawn-time and readiness-time heartbeat paths
+    // stay aligned. Falling back to ASTRBOT_ROOT only helps older/custom call sites that do not
+    // pass a root dir; packaged launches may finally fall back to the default packaged root.
     if let Some(root) = root_dir {
         return Some(root.join(trimmed));
     }

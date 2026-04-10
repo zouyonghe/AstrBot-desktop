@@ -13,6 +13,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR / "app"
 _WINDOWS_DLL_DIRECTORY_HANDLES: list[object] = []
+# Keep this in sync with BACKEND_STARTUP_HEARTBEAT_PATH_ENV in src-tauri/src/app_constants.rs.
 STARTUP_HEARTBEAT_ENV = "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH"
 STARTUP_HEARTBEAT_INTERVAL_SECONDS = 2.0
 
@@ -168,6 +169,9 @@ def heartbeat_loop(
     warning_emitted_since_last_success = False
 
     def should_warn() -> bool:
+        # Before the first successful heartbeat we want every failure to surface so startup
+        # path/permission issues stay visible. After a success, only warn on the first failure in
+        # each consecutive failure run to avoid log spam.
         return (not had_successful_write) or (not warning_emitted_since_last_success)
 
     ok = write_startup_heartbeat(path, "starting", warn_on_error=True)
