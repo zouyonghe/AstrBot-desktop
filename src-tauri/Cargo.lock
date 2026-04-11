@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "astrbot-desktop-tauri"
-version = "4.22.3"
+version = "4.23.0-beta.1"
 dependencies = [
  "chrono",
  "home",
