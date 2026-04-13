@@ -60,6 +60,43 @@ export const patchMonacoCssNestingWarnings = async ({ dashboardDir, projectRoot 
   }
 };
 
+export const patchDesktopReleaseUpdateIndicator = async ({ dashboardDir, projectRoot }) => {
+  const file = path.join(
+    dashboardDir,
+    'src',
+    'layouts',
+    'full',
+    'vertical-header',
+    'VerticalHeader.vue',
+  );
+  if (!existsSync(file)) {
+    return;
+  }
+
+  const source = await readFile(file, 'utf8');
+  if (source.includes('const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;')) {
+    return;
+  }
+
+  const target = "      hasNewVersion.value = res.data.data.has_new_version;\n\n      if (res.data.data.has_new_version) {";
+  const replacement =
+    "      const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;\n" +
+    "      hasNewVersion.value = backendHasNewVersion;\n\n" +
+    "      if (backendHasNewVersion) {";
+
+  if (!source.includes(target)) {
+    return;
+  }
+
+  const patched = source.replace(target, replacement);
+  if (patched !== source) {
+    await writeFile(file, patched, 'utf8');
+    console.log(
+      `[prepare-resources] Patched desktop release update banner gating in ${path.relative(projectRoot, file)}`,
+    );
+  }
+};
+
 export const verifyDesktopBridgeArtifacts = async ({
   dashboardDir,
   projectRoot,
