@@ -65,7 +65,7 @@ test('shouldEnforceDesktopBridgeExpectation enforces required expectations on no
   );
 });
 
-test('patchDesktopReleaseUpdateIndicator suppresses backend update banner in desktop release mode', async () => {
+test('patchDesktopReleaseUpdateIndicator tolerates minor formatting changes in the upstream source', async () => {
   const dashboardDir = await mkdtemp(path.join(tmpdir(), 'astrbot-dashboard-'));
   const headerFile = path.join(
     dashboardDir,
@@ -81,9 +81,8 @@ test('patchDesktopReleaseUpdateIndicator suppresses backend update banner in des
     `function checkUpdate() {
   axios.get('/api/update/check')
     .then((res) => {
-      hasNewVersion.value = res.data.data.has_new_version;
-
-      if (res.data.data.has_new_version) {
+        hasNewVersion.value   =   res.data.data.has_new_version;
+      if   ( res.data.data.has_new_version )   {
         releaseMessage.value = res.data.message;
         updateStatus.value = t('core.header.version.hasNewVersion');
       } else {
@@ -108,4 +107,42 @@ test('patchDesktopReleaseUpdateIndicator suppresses backend update banner in des
   assert.match(patched, /hasNewVersion\.value = backendHasNewVersion;/);
   assert.match(patched, /if \(backendHasNewVersion\) \{/);
   assert.doesNotMatch(patched, /hasNewVersion\.value = res\.data\.data\.has_new_version;/);
+});
+
+test('patchDesktopReleaseUpdateIndicator warns when the expected update pattern is missing', async () => {
+  const dashboardDir = await mkdtemp(path.join(tmpdir(), 'astrbot-dashboard-'));
+  const headerFile = path.join(
+    dashboardDir,
+    'src',
+    'layouts',
+    'full',
+    'vertical-header',
+    'VerticalHeader.vue',
+  );
+  await mkdir(path.dirname(headerFile), { recursive: true });
+  await writeFile(
+    headerFile,
+    `function checkUpdate() {
+  axios.get('/api/update/check')
+    .then((res) => {
+      updateStatus.value = res.data.message;
+    })
+}
+`,
+    'utf8',
+  );
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+
+  try {
+    await patchDesktopReleaseUpdateIndicator({ dashboardDir, projectRoot: dashboardDir });
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Could not patch desktop release update banner gating/);
+  assert.match(warnings[0], /VerticalHeader\.vue/);
 });

@@ -78,17 +78,23 @@ export const patchDesktopReleaseUpdateIndicator = async ({ dashboardDir, project
     return;
   }
 
-  const target = "      hasNewVersion.value = res.data.data.has_new_version;\n\n      if (res.data.data.has_new_version) {";
-  const replacement =
-    "      const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;\n" +
-    "      hasNewVersion.value = backendHasNewVersion;\n\n" +
-    "      if (backendHasNewVersion) {";
+  const targetPattern =
+    /^(\s*)hasNewVersion\.value\s*=\s*res\.data\.data\.has_new_version;\s*\n\s*if\s*\(\s*res\.data\.data\.has_new_version\s*\)\s*\{/m;
 
-  if (!source.includes(target)) {
+  if (!targetPattern.test(source)) {
+    console.warn(
+      `[prepare-resources] Could not patch desktop release update banner gating in ${path.relative(projectRoot, file)} because the expected update check pattern was not found.`,
+    );
     return;
   }
 
-  const patched = source.replace(target, replacement);
+  const patched = source.replace(
+    targetPattern,
+    (_, indent) =>
+      `${indent}const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;\n` +
+      `${indent}hasNewVersion.value = backendHasNewVersion;\n\n` +
+      `${indent}if (backendHasNewVersion) {`,
+  );
   if (patched !== source) {
     await writeFile(file, patched, 'utf8');
     console.log(
