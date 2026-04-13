@@ -31,6 +31,9 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "macOS": {
+      "entitlements": "entitlements.plist"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",

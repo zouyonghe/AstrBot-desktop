@@ -266,6 +266,75 @@ jobs:
         with:
           astrbot_version: ${{ steps.desktop_version.outputs.normalized }}
 
+      - name: Import Apple Developer Certificate
+        id: import_apple_certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "APPLE_CERTIFICATE is not configured; skipping certificate import."
+            printf 'signing_identity=\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+          signing_identities=()
+          while IFS= read -r identity; do
+            signing_identities+=("$identity")
+          done < <(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" || true)
+          if [ "${#signing_identities[@]}" -eq 0 ]; then
+            echo "::error::No Developer ID Application identity found in the imported keychain." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+          if [ "${#signing_identities[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one Developer ID Application identity, found ${#signing_identities[@]}." >&2
+            printf '%s\n' "${signing_identities[@]}" >&2
+            exit 1
+          fi
+          CERT_ID=$(printf '%s\n' "${signing_identities[0]}" | awk -F'"' '{print $2}')
+          if [ -z "$CERT_ID" ]; then
+            echo "::error::Failed to parse the imported Developer ID Application identity." >&2
+            exit 1
+          fi
+          printf 'APPLE_SIGNING_IDENTITY=%s\n' "$CERT_ID" >> "$GITHUB_ENV"
+          printf 'signing_identity=%s\n' "$CERT_ID" >> "$GITHUB_OUTPUT"
+          echo "Imported signing identity: $CERT_ID"
+
+      - name: Pre-sign backend resources (macOS)
+        if: ${{ steps.import_apple_certificate.outputs.signing_identity != '' }}
+        env:
+          ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
+          ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
+          ASTRBOT_DESKTOP_VERSION: ${{ steps.desktop_version.outputs.prefixed }}
+          ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY: ${{ env.ASTRBOT_DESKTOP_UPDATER_PUBLIC_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run prepare:resources
+          if [ ! -d "resources/backend" ]; then
+            echo "::error::resources/backend not found after prepare:resources." >&2
+            exit 1
+          fi
+          echo "Pre-signing Mach-O binaries in resources/backend..."
+          bash scripts/ci/codesign-macos-nested.sh "resources/backend" "src-tauri/entitlements.plist"
+
       - name: Resolve macOS app bundle name
         id: resolve_macos_app_bundle
         env:
@@ -295,6 +364,11 @@ jobs:
           ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS: ${{ vars.ASTRBOT_DESKTOP_CRYPTOGRAPHY_FALLBACK_VERSIONS || '' }}
           ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS: ${{ vars.ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS || '3' }}
           ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS: ${{ vars.ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS || '8' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -306,6 +380,8 @@ jobs:
 
           max_attempts="${ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS}"
           retry_sleep_seconds="${ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS}"
+          # Resources are already prepared and pre-signed in the previous step.
+          tauri_config_override='{"build":{"beforeBuildCommand":""}}'
           # Retry only for known transient cargo/crates network failures.
           # Spurious retry hints emitted by cargo.
           transient_retry_spurious='spurious network error|network failure seems to have happened'
@@ -330,7 +406,7 @@ jobs:
 
           for attempt in $(seq 1 "${max_attempts}"); do
             build_log="$(mktemp -t tauri-macos-build.XXXXXX.log)"
-            if cargo tauri build --verbose --target ${{ matrix.target }} --bundles app 2>&1 | tee "${build_log}"; then
+            if cargo tauri build --verbose --target ${{ matrix.target }} --bundles app --config "${tauri_config_override}" 2>&1 | tee "${build_log}"; then
               rm -f "${build_log}" || true
               break
             fi

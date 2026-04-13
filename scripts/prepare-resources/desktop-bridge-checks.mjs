@@ -60,6 +60,49 @@ export const patchMonacoCssNestingWarnings = async ({ dashboardDir, projectRoot 
   }
 };
 
+export const patchDesktopReleaseUpdateIndicator = async ({ dashboardDir, projectRoot }) => {
+  const file = path.join(
+    dashboardDir,
+    'src',
+    'layouts',
+    'full',
+    'vertical-header',
+    'VerticalHeader.vue',
+  );
+  if (!existsSync(file)) {
+    return;
+  }
+
+  const source = await readFile(file, 'utf8');
+  if (source.includes('const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;')) {
+    return;
+  }
+
+  const targetPattern =
+    /^(\s*)hasNewVersion\.value\s*=\s*res\.data\.data\.has_new_version;\s*\n\s*if\s*\(\s*res\.data\.data\.has_new_version\s*\)\s*\{/m;
+
+  if (!targetPattern.test(source)) {
+    console.warn(
+      `[prepare-resources] Could not patch desktop release update banner gating in ${path.relative(projectRoot, file)} because the expected update check pattern was not found.`,
+    );
+    return;
+  }
+
+  const patched = source.replace(
+    targetPattern,
+    (_, indent) =>
+      `${indent}const backendHasNewVersion = !isDesktopReleaseMode.value && res.data.data.has_new_version;\n` +
+      `${indent}hasNewVersion.value = backendHasNewVersion;\n\n` +
+      `${indent}if (backendHasNewVersion) {`,
+  );
+  if (patched !== source) {
+    await writeFile(file, patched, 'utf8');
+    console.log(
+      `[prepare-resources] Patched desktop release update banner gating in ${path.relative(projectRoot, file)}`,
+    );
+  }
+};
+
 export const verifyDesktopBridgeArtifacts = async ({
   dashboardDir,
   projectRoot,
