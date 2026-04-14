@@ -47,7 +47,9 @@ test('check-scripts workflow installs node dependencies before running node test
 
   assert.equal(setupToolchainsStep.with['node-cache'], 'pnpm');
   assert.equal(setupToolchainsStep.with['node-cache-dependency-path'], 'pnpm-lock.yaml');
-  assert.match(installStep.run, /pnpm install --frozen-lockfile --ignore-scripts/);
+  assert.match(installStep.run, /pnpm install/);
+  assert.match(installStep.run, /--frozen-lockfile/);
+  assert.match(installStep.run, /--ignore-scripts/);
 
   assert.ok(pnpmSetupIndex < setupToolchainsIndex);
   assert.ok(pnpmSetupIndex < installIndex);

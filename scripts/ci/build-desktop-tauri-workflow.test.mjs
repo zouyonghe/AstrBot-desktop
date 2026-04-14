@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   extractWorkflowJobSteps,
   findStep,
+  findStepIndex,
   readWorkflowObject,
 } from './workflow-test-utils.mjs';
 
@@ -34,9 +35,24 @@ test('macOS workflow exposes structured build-macos steps', async () => {
 test('macOS workflow prepares resources before optional pre-signing', async () => {
   const workflowObject = await readWorkflowObject(WORKFLOW_FILE);
   const steps = extractWorkflowJobSteps(workflowObject, BUILD_MACOS_JOB);
-  const prepareStep = findStep(steps, 'prepare resources step', (step) => PREPARE_RESOURCES_RUN.test(step.run ?? ''));
-  const preSignStep = findStep(steps, 'pre-sign resources step', (step) => PRESIGN_BACKEND_RUN.test(step.run ?? ''));
-  const buildStep = findStep(steps, 'build app bundle step', (step) => BUILD_APP_BUNDLE_RUN.test(step.run ?? ''));
+  const prepareStepIndex = findStepIndex(
+    steps,
+    (step) => PREPARE_RESOURCES_RUN.test(step.run ?? ''),
+    'prepare resources step',
+  );
+  const preSignStepIndex = findStepIndex(
+    steps,
+    (step) => PRESIGN_BACKEND_RUN.test(step.run ?? ''),
+    'pre-sign resources step',
+  );
+  const buildStepIndex = findStepIndex(
+    steps,
+    (step) => BUILD_APP_BUNDLE_RUN.test(step.run ?? ''),
+    'build app bundle step',
+  );
+  const prepareStep = steps[prepareStepIndex];
+  const preSignStep = steps[preSignStepIndex];
+  const buildStep = steps[buildStepIndex];
 
   assert.equal(prepareStep.if, undefined);
   assert.match(prepareStep.run, /pnpm run prepare:resources/);
@@ -45,8 +61,8 @@ test('macOS workflow prepares resources before optional pre-signing', async () =
   assert.match(preSignStep.if ?? '', /import_apple_certificate\.outputs\.signing_identity/);
   assert.doesNotMatch(preSignStep.run, /pnpm run prepare:resources/);
 
-  assert.ok(steps.indexOf(prepareStep) < steps.indexOf(preSignStep));
-  assert.ok(steps.indexOf(preSignStep) < steps.indexOf(buildStep));
+  assert.ok(prepareStepIndex < preSignStepIndex);
+  assert.ok(preSignStepIndex < buildStepIndex);
   assert.match(
     buildStep.run,
     /Resources are already prepared/,
