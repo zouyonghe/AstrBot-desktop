@@ -27,11 +27,6 @@ pub(crate) enum RunEventAction {
     HandleExit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ClosePromptFailureAction {
-    KeepMainWindowVisible,
-}
-
 pub(crate) fn main_window_action(
     window_label: &str,
     is_quitting: bool,
@@ -101,15 +96,11 @@ pub(crate) fn run_event_action(event: &RunEvent) -> RunEventAction {
     }
 }
 
-pub(crate) fn close_prompt_failure_action() -> ClosePromptFailureAction {
-    ClosePromptFailureAction::KeepMainWindowVisible
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        close_prompt_failure_action, main_window_action, page_load_action, run_event_action,
-        ClosePromptFailureAction, MainWindowAction, PageLoadAction, RunEventAction,
+        main_window_action, page_load_action, run_event_action, MainWindowAction, PageLoadAction,
+        RunEventAction,
     };
     use crate::close_behavior::CloseAction;
     use tauri::{webview::PageLoadEvent, RunEvent};
@@ -185,14 +176,6 @@ mod tests {
         assert_eq!(
             run_event_action(&RunEvent::Exit),
             RunEventAction::HandleExit
-        );
-    }
-
-    #[test]
-    fn close_prompt_failure_action_keeps_main_window_visible() {
-        assert_eq!(
-            close_prompt_failure_action(),
-            ClosePromptFailureAction::KeepMainWindowVisible
         );
     }
 }
