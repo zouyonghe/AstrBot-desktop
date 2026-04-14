@@ -315,8 +315,7 @@ jobs:
           printf 'signing_identity=%s\n' "$CERT_ID" >> "$GITHUB_OUTPUT"
           echo "Imported signing identity: $CERT_ID"
 
-      - name: Pre-sign backend resources (macOS)
-        if: ${{ steps.import_apple_certificate.outputs.signing_identity != '' }}
+      - name: Prepare desktop resources (macOS)
         env:
           ASTRBOT_SOURCE_GIT_URL: ${{ needs.resolve_build_context.outputs.source_git_url }}
           ASTRBOT_SOURCE_GIT_REF: ${{ needs.resolve_build_context.outputs.source_git_ref }}
@@ -332,6 +331,12 @@ jobs:
             echo "::error::resources/backend not found after prepare:resources." >&2
             exit 1
           fi
+
+      - name: Pre-sign backend resources (macOS)
+        if: ${{ steps.import_apple_certificate.outputs.signing_identity != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
           echo "Pre-signing Mach-O binaries in resources/backend..."
           bash scripts/ci/codesign-macos-nested.sh "resources/backend" "src-tauri/entitlements.plist"
 
@@ -380,7 +385,7 @@ jobs:
 
           max_attempts="${ASTRBOT_MACOS_BUILD_MAX_ATTEMPTS}"
           retry_sleep_seconds="${ASTRBOT_MACOS_BUILD_RETRY_SLEEP_SECONDS}"
-          # Resources are already prepared and pre-signed in the previous step.
+          # Resources are already prepared and, when available, pre-signed in earlier steps.
           tauri_config_override='{"build":{"beforeBuildCommand":""}}'
           # Retry only for known transient cargo/crates network failures.
           # Spurious retry hints emitted by cargo.

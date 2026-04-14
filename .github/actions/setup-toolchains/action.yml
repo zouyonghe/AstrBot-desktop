@@ -10,6 +10,14 @@ inputs:
     description: Node.js version.
     required: false
     default: '20'
+  node-cache:
+    description: Optional actions/setup-node cache backend.
+    required: false
+    default: ''
+  node-cache-dependency-path:
+    description: Optional dependency file path used by actions/setup-node cache.
+    required: false
+    default: ''
   setup-python:
     description: Whether to setup Python.
     required: false
@@ -27,6 +35,8 @@ runs:
       uses: actions/setup-node@v6.2.0
       with:
         node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.node-cache }}
+        cache-dependency-path: ${{ inputs.node-cache-dependency-path }}
 
     - name: Setup Python
       if: ${{ inputs.setup-python == 'true' }}

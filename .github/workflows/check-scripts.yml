@@ -18,10 +18,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 10.28.2
+
       - name: Setup Toolchains
         uses: ./.github/actions/setup-toolchains
         with:
           node-version: '20'
+          node-cache: 'pnpm'
+          node-cache-dependency-path: pnpm-lock.yaml
           python-version: '3.12'
 
       - name: Check Node scripts syntax
@@ -35,6 +42,11 @@ jobs:
             echo "Checking ${file}"
             node --check "${file}"
           done < <(find scripts -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' \) -print0 | sort -z)
+
+      - name: Install Node test dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Run Node script behavior tests
         run: |
