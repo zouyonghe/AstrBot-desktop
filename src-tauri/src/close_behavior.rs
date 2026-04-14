@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn write_cached_close_action_errors_when_state_path_is_unavailable() {
-        let result = super::write_cached_close_action(Some(CloseAction::Tray), None, &noop_log);
+        let result = super::write_cached_close_action(Some(CloseAction::Tray), None, noop_log);
 
         assert_eq!(
             result,
