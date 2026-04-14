@@ -5,8 +5,6 @@ use std::{fs, io::Write, path::Path};
 pub(crate) const CLOSE_ACTION_TRAY: &str = "tray";
 pub(crate) const CLOSE_ACTION_EXIT: &str = "exit";
 
-type Logger<'a> = dyn Fn(&str) + 'a;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CloseAction {
@@ -54,7 +52,10 @@ pub(crate) fn parse_close_action(raw: &str) -> Option<CloseAction> {
     }
 }
 
-fn load_desktop_state(raw: &str, log_subject: &str, log: &Logger<'_>) -> DesktopState {
+fn load_desktop_state<F>(raw: &str, log_subject: &str, log: &F) -> DesktopState
+where
+    F: Fn(&str),
+{
     match serde_json::from_str::<DesktopState>(raw) {
         Ok(state) => state,
         Err(error) => {
@@ -77,25 +78,28 @@ where
     read_cached_close_action_at_path(&state_path, &log)
 }
 
-fn read_cached_close_action_at_path(state_path: &Path, log: &Logger<'_>) -> Option<CloseAction> {
+fn read_cached_close_action_at_path<F>(state_path: &Path, log: &F) -> Option<CloseAction>
+where
+    F: Fn(&str),
+{
     let raw = fs::read_to_string(state_path).ok()?;
     let state = load_desktop_state(&raw, "desktop close behavior state", log);
     state.close_action
 }
 
-fn atomic_write_json(path: &Path, value: &impl Serialize, what: &str) -> Result<(), String> {
+fn atomic_write_desktop_state(path: &Path, state: &DesktopState) -> Result<(), String> {
     if let Some(parent_dir) = path.parent() {
         fs::create_dir_all(parent_dir).map_err(|error| {
             format!(
-                "Failed to create {what} directory {}: {}",
+                "Failed to create desktop state directory {}: {}",
                 parent_dir.display(),
                 error
             )
         })?;
     }
 
-    let serialized = serde_json::to_string_pretty(value)
-        .map_err(|error| format!("Failed to serialize {what}: {error}"))?;
+    let serialized = serde_json::to_string_pretty(state)
+        .map_err(|error| format!("Failed to serialize desktop state: {error}"))?;
     let tmp_name = format!(
         "{}.tmp",
         path.file_name()
@@ -106,7 +110,7 @@ fn atomic_write_json(path: &Path, value: &impl Serialize, what: &str) -> Result<
 
     let mut file = fs::File::create(&tmp_path).map_err(|error| {
         format!(
-            "Failed to create temporary {what} file {}: {}",
+            "Failed to create temporary desktop state file {}: {}",
             tmp_path.display(),
             error
         )
@@ -115,14 +119,14 @@ fn atomic_write_json(path: &Path, value: &impl Serialize, what: &str) -> Result<
         .and_then(|_| file.sync_all())
         .map_err(|error| {
             format!(
-                "Failed to write temporary {what} file {}: {}",
+                "Failed to write temporary desktop state file {}: {}",
                 tmp_path.display(),
                 error
             )
         })?;
     fs::rename(&tmp_path, path).map_err(|error| {
         format!(
-            "Failed to atomically replace {what} file {}: {}",
+            "Failed to atomically replace desktop state file {}: {}",
             path.display(),
             error
         )
@@ -130,7 +134,7 @@ fn atomic_write_json(path: &Path, value: &impl Serialize, what: &str) -> Result<
 }
 
 fn save_desktop_state(path: &Path, state: &DesktopState) -> Result<(), String> {
-    atomic_write_json(path, state, "close behavior state")
+    atomic_write_desktop_state(path, state)
 }
 
 pub(crate) fn write_cached_close_action<F>(
@@ -150,11 +154,14 @@ where
     write_cached_close_action_at_path(action, &state_path, &log)
 }
 
-fn write_cached_close_action_at_path(
+fn write_cached_close_action_at_path<F>(
     action: Option<CloseAction>,
     state_path: &Path,
-    log: &Logger<'_>,
-) -> Result<(), String> {
+    log: &F,
+) -> Result<(), String>
+where
+    F: Fn(&str),
+{
     let mut state = match fs::read_to_string(state_path) {
         Ok(raw) => load_desktop_state(
             &raw,
