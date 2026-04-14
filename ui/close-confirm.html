@@ -28,8 +28,8 @@
 
       .dialog {
         box-sizing: border-box;
-        width: min(100%, 420px);
-        padding: 20px;
+        width: 100%;
+        padding: 12px;
       }
 
       .card {
@@ -108,7 +108,7 @@
 
       @media (max-width: 380px) {
         .dialog {
-          padding: 16px;
+          padding: 10px;
         }
 
         .actions {
@@ -257,6 +257,9 @@
             }
           }
         } catch (_invokeError) {
+          if (action === exitAction) {
+            return;
+          }
           error.textContent = copy.submitError;
           setPending(false);
         }

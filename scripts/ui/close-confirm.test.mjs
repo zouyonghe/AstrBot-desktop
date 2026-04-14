@@ -48,3 +48,11 @@ test('close confirm dialog only schedules frontend close fallback for tray actio
   assert.match(html, /recoveryTimer = window\.setTimeout\(/);
   assert.match(html, /window\.close\(\);/);
 });
+
+test('close confirm dialog suppresses invoke teardown errors for exit actions', async () => {
+  const html = await readHtml();
+
+  assert.match(html, /catch \(_invokeError\) \{/);
+  assert.match(html, /if \(action === exitAction\) \{/);
+  assert.match(html, /return;/);
+});
