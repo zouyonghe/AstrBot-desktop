@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AstrBot</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #111827;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(180deg, #f7f8fc 0%, #eef2f7 100%);
+      }
+
+      .dialog {
+        box-sizing: border-box;
+        width: min(100%, 420px);
+        padding: 20px;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+        padding: 20px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 20px;
+        line-height: 1.3;
+      }
+
+      p {
+        margin: 0;
+        color: #4b5563;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .remember {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 18px 0 0;
+        font-size: 14px;
+        color: #1f2937;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 12px;
+        padding: 12px 14px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 120ms ease, opacity 120ms ease;
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      .primary {
+        background: #2563eb;
+        color: #ffffff;
+      }
+
+      .secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+
+      .error {
+        min-height: 20px;
+        margin-top: 12px;
+        color: #b91c1c;
+        font-size: 13px;
+      }
+
+      @media (max-width: 380px) {
+        .dialog {
+          padding: 16px;
+        }
+
+        .actions {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          background: #0f172a;
+          color: #f8fafc;
+        }
+
+        body {
+          background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+        }
+
+        .card {
+          background: rgba(17, 24, 39, 0.94);
+          border-color: rgba(148, 163, 184, 0.16);
+          box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+        }
+
+        p,
+        .remember {
+          color: #cbd5e1;
+        }
+
+        .secondary {
+          background: #334155;
+          color: #f8fafc;
+        }
+
+        .error {
+          color: #fca5a5;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="dialog">
+      <section class="card">
+        <h1 id="title"></h1>
+        <p id="description"></p>
+        <label class="remember">
+          <input id="remember" type="checkbox" />
+          <span id="remember-label"></span>
+        </label>
+        <div class="actions">
+          <button id="tray-button" class="primary" type="button"></button>
+          <button id="exit-button" class="secondary" type="button"></button>
+        </div>
+        <div id="error" class="error" aria-live="polite"></div>
+      </section>
+    </main>
+    <script>
+      const messages = {
+        "zh-CN": {
+          lang: "zh-CN",
+          title: "关闭 AstrBot",
+          description: "关闭主窗口时，AstrBot 默认会最小化到系统托盘，你仍然可以从托盘重新打开它。",
+          remember: "不再显示",
+          tray: "最小化到托盘",
+          exit: "直接退出",
+          submitError: "操作失败，请重试。",
+          submitStalled: "窗口未能自动关闭，请重试。"
+        },
+        "en-US": {
+          lang: "en-US",
+          title: "Close AstrBot",
+          description: "Closing the window will minimize AstrBot to the tray by default, and you can reopen it from the tray anytime.",
+          remember: "Don't show again",
+          tray: "Minimize to tray",
+          exit: "Exit now",
+          submitError: "Action failed. Please try again.",
+          submitStalled: "The window did not close automatically. Please try again."
+        }
+      };
+
+      const params = new URLSearchParams(window.location.search);
+      const locale = params.get("locale") === "zh-CN" ? "zh-CN" : "en-US";
+      const copy = messages[locale];
+      const remember = document.getElementById("remember");
+      const trayButton = document.getElementById("tray-button");
+      const exitButton = document.getElementById("exit-button");
+      const error = document.getElementById("error");
+      let recoveryTimer = null;
+
+      document.documentElement.lang = copy.lang;
+      document.getElementById("title").textContent = copy.title;
+      document.getElementById("description").textContent = copy.description;
+      document.getElementById("remember-label").textContent = copy.remember;
+      trayButton.textContent = locale === "zh-CN" ? copy.tray : "Minimize to tray";
+      exitButton.textContent = locale === "zh-CN" ? copy.exit : "Exit now";
+
+      function setPending(pending) {
+        trayButton.disabled = pending;
+        exitButton.disabled = pending;
+        remember.disabled = pending;
+      }
+
+      function clearRecoveryTimer() {
+        if (recoveryTimer !== null) {
+          window.clearTimeout(recoveryTimer);
+          recoveryTimer = null;
+        }
+      }
+
+      async function submit(action) {
+        clearRecoveryTimer();
+        error.textContent = "";
+        setPending(true);
+
+        try {
+          const result = await window.__TAURI_INTERNALS__.invoke(
+            "desktop_bridge_submit_close_prompt",
+            { action, remember: remember.checked }
+          );
+
+          if (!result || result.ok !== true) {
+            error.textContent = (result && result.reason) || copy.submitError;
+            setPending(false);
+            return;
+          }
+
+          recoveryTimer = window.setTimeout(() => {
+            recoveryTimer = null;
+            if (document.visibilityState !== "hidden") {
+              error.textContent = copy.submitStalled;
+              setPending(false);
+            }
+          }, 1500);
+
+          if (typeof window.close === "function") {
+            window.close();
+          }
+        } catch (invokeError) {
+          const message =
+            invokeError && typeof invokeError === "object" && "message" in invokeError
+              ? String(invokeError.message)
+              : String(invokeError || copy.submitError);
+          error.textContent = message;
+          setPending(false);
+        }
+      }
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") {
+          clearRecoveryTimer();
+        }
+      });
+      window.addEventListener("pagehide", clearRecoveryTimer);
+
+      trayButton.addEventListener("click", () => submit("tray"));
+      exitButton.addEventListener("click", () => submit("exit"));
+    </script>
+  </body>
+</html>

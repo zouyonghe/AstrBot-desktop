@@ -4,8 +4,9 @@ use tauri::{
 };
 
 use crate::{
-    app_runtime_events, append_desktop_log, append_startup_log, bridge, lifecycle, startup_task,
-    tray, window, BackendState, DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
+    app_runtime_events, append_desktop_log, append_shutdown_log, append_startup_log, bridge,
+    close_behavior, lifecycle, startup_task, tray, window, BackendState, DEFAULT_SHELL_LOCALE,
+    DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
 };
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
@@ -22,24 +23,54 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
     builder.on_window_event(|window, event| {
         let is_quitting = window.app_handle().state::<BackendState>().is_quitting();
         let action = match &event {
-            WindowEvent::CloseRequested { .. } => app_runtime_events::main_window_action(
-                window.label(),
-                is_quitting,
-                false,
-                true,
-                false,
-            ),
+            WindowEvent::CloseRequested { .. } => {
+                let packaged_root_dir = crate::runtime_paths::default_packaged_root_dir();
+                let saved_close_action =
+                    close_behavior::read_cached_close_action(packaged_root_dir.as_deref());
+
+                app_runtime_events::main_window_action(
+                    window.label(),
+                    is_quitting,
+                    false,
+                    true,
+                    false,
+                    saved_close_action,
+                )
+            }
             WindowEvent::Focused(false) => app_runtime_events::main_window_action(
                 window.label(),
                 is_quitting,
                 matches!(window.is_minimized(), Ok(true)),
                 false,
                 true,
+                None,
             ),
             _ => app_runtime_events::MainWindowAction::None,
         };
 
         match action {
+            app_runtime_events::MainWindowAction::ShowClosePrompt => {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+                append_desktop_log(
+                    "main window close requested without saved preference; close prompt pending",
+                );
+                if let Err(error) = window::close_confirm::show_close_confirm_window(
+                    window.app_handle(),
+                    DEFAULT_SHELL_LOCALE,
+                    append_desktop_log,
+                ) {
+                    append_desktop_log(&format!(
+                        "failed to open close confirm prompt window: {error}"
+                    ));
+                    window::actions::hide_main_window(
+                        window.app_handle(),
+                        DEFAULT_SHELL_LOCALE,
+                        append_desktop_log,
+                    );
+                }
+            }
             app_runtime_events::MainWindowAction::PreventCloseAndHide => {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -49,6 +80,12 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                     DEFAULT_SHELL_LOCALE,
                     append_desktop_log,
                 );
+            }
+            app_runtime_events::MainWindowAction::ExitApplication => {
+                let state = window.app_handle().state::<BackendState>();
+                state.mark_quitting();
+                append_shutdown_log("main window close requested with saved exit preference");
+                window.app_handle().exit(0);
             }
             app_runtime_events::MainWindowAction::HideIfMinimized => {
                 window::actions::hide_main_window(
@@ -170,6 +207,7 @@ pub(crate) fn run() {
             crate::bridge::commands::desktop_bridge_restart_backend,
             crate::bridge::commands::desktop_bridge_stop_backend,
             crate::bridge::commands::desktop_bridge_open_external_url,
+            crate::bridge::commands::desktop_bridge_submit_close_prompt,
             crate::bridge::commands::desktop_bridge_check_app_update,
             crate::bridge::commands::desktop_bridge_install_app_update
         ])

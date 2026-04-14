@@ -1,9 +1,13 @@
 use tauri::{webview::PageLoadEvent, RunEvent};
 
+use crate::close_behavior::CloseAction;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MainWindowAction {
     None,
+    ShowClosePrompt,
     PreventCloseAndHide,
+    ExitApplication,
     HideIfMinimized,
 }
 
@@ -29,6 +33,7 @@ pub(crate) fn main_window_action(
     minimized_on_focus_lost: bool,
     is_close_requested: bool,
     is_focus_lost: bool,
+    saved_close_action: Option<CloseAction>,
 ) -> MainWindowAction {
     if window_label != "main" {
         return MainWindowAction::None;
@@ -38,7 +43,11 @@ pub(crate) fn main_window_action(
         return if is_quitting {
             MainWindowAction::None
         } else {
-            MainWindowAction::PreventCloseAndHide
+            match saved_close_action {
+                Some(CloseAction::Tray) => MainWindowAction::PreventCloseAndHide,
+                Some(CloseAction::Exit) => MainWindowAction::ExitApplication,
+                None => MainWindowAction::ShowClosePrompt,
+            }
         };
     }
 
@@ -93,6 +102,7 @@ mod tests {
         main_window_action, page_load_action, run_event_action, MainWindowAction, PageLoadAction,
         RunEventAction,
     };
+    use crate::close_behavior::CloseAction;
     use tauri::{webview::PageLoadEvent, RunEvent};
 
     #[cfg(target_os = "macos")]
@@ -101,23 +111,39 @@ mod tests {
     #[test]
     fn main_window_action_ignores_non_main_windows() {
         assert_eq!(
-            main_window_action("settings", false, false, true, false),
+            main_window_action("settings", false, false, true, false, None),
             MainWindowAction::None
         );
     }
 
     #[test]
-    fn main_window_action_hides_on_close_when_not_quitting() {
+    fn main_window_action_prompts_when_no_saved_close_preference_exists() {
         assert_eq!(
-            main_window_action("main", false, false, true, false),
+            main_window_action("main", false, false, true, false, None),
+            MainWindowAction::ShowClosePrompt
+        );
+    }
+
+    #[test]
+    fn main_window_action_hides_on_close_when_saved_preference_is_tray() {
+        assert_eq!(
+            main_window_action("main", false, false, true, false, Some(CloseAction::Tray)),
             MainWindowAction::PreventCloseAndHide
+        );
+    }
+
+    #[test]
+    fn main_window_action_exits_on_close_when_saved_preference_is_exit() {
+        assert_eq!(
+            main_window_action("main", false, false, true, false, Some(CloseAction::Exit)),
+            MainWindowAction::ExitApplication
         );
     }
 
     #[test]
     fn main_window_action_hides_on_minimized_focus_loss() {
         assert_eq!(
-            main_window_action("main", false, true, false, true),
+            main_window_action("main", false, true, false, true, None),
             MainWindowAction::HideIfMinimized
         );
     }

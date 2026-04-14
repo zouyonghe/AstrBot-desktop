@@ -13,9 +13,10 @@ use crate::bridge::updater_types::{
     map_update_channel_ok, map_update_check_error, map_update_install_error, map_update_install_ok,
     DesktopAppUpdateChannelResult, DesktopAppUpdateCheckResult, DesktopAppUpdateResult,
 };
+use crate::close_behavior::{self, CloseAction};
 use crate::{
     append_desktop_log, restart_backend_flow, runtime_paths, shell_locale, tray, update_channel,
-    BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
+    window, BackendBridgeResult, BackendBridgeState, BackendState, DEFAULT_SHELL_LOCALE,
 };
 
 fn resolve_update_channel(app_handle: &AppHandle) -> update_channel::UpdateChannel {
@@ -160,6 +161,11 @@ fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
     }
 }
 
+fn parse_close_prompt_action(raw_action: &str) -> Result<CloseAction, String> {
+    close_behavior::parse_close_action(raw_action)
+        .ok_or_else(|| "Invalid close action. Expected 'tray' or 'exit'.".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn open_url_with_system_browser(url: &str) -> Result<(), String> {
     Command::new("open")
@@ -284,6 +290,68 @@ pub(crate) fn desktop_bridge_open_external_url(url: String) -> BackendBridgeResu
             ok: false,
             reason: Some(error),
         },
+    }
+}
+
+#[tauri::command]
+pub(crate) fn desktop_bridge_submit_close_prompt(
+    app_handle: AppHandle,
+    action: String,
+    remember: bool,
+) -> BackendBridgeResult {
+    let action = match parse_close_prompt_action(&action) {
+        Ok(action) => action,
+        Err(error) => {
+            return BackendBridgeResult {
+                ok: false,
+                reason: Some(error),
+            };
+        }
+    };
+
+    if remember {
+        let packaged_root_dir = runtime_paths::default_packaged_root_dir();
+        if let Err(error) =
+            close_behavior::write_cached_close_action(Some(action), packaged_root_dir.as_deref())
+        {
+            append_desktop_log(&format!(
+                "failed to persist remembered close action; continuing with selected action: {error}"
+            ));
+        }
+    }
+
+    match action {
+        CloseAction::Tray => {
+            window::actions::hide_main_window(
+                &app_handle,
+                DEFAULT_SHELL_LOCALE,
+                append_desktop_log,
+            );
+            if let Some(prompt_window) = app_handle.get_webview_window("close-confirm") {
+                if let Err(error) = prompt_window.close() {
+                    let reason = format!("Failed to close close confirm prompt window: {error}");
+                    append_desktop_log(&reason);
+                    return BackendBridgeResult {
+                        ok: false,
+                        reason: Some(reason),
+                    };
+                }
+            }
+
+            BackendBridgeResult {
+                ok: true,
+                reason: None,
+            }
+        }
+        CloseAction::Exit => {
+            let state = app_handle.state::<BackendState>();
+            state.mark_quitting();
+            app_handle.exit(0);
+            BackendBridgeResult {
+                ok: true,
+                reason: None,
+            }
+        }
     }
 }
 
@@ -467,6 +535,20 @@ mod tests {
             update_check_short_circuit_result(DesktopUpdateMode::ManualDownload, "4.19.2")
                 .is_none(),
             "manual-download mode should keep running the update check"
+        );
+    }
+
+    #[test]
+    fn parse_close_prompt_action_accepts_supported_values() {
+        assert_eq!(parse_close_prompt_action("tray"), Ok(CloseAction::Tray));
+        assert_eq!(parse_close_prompt_action("exit"), Ok(CloseAction::Exit));
+    }
+
+    #[test]
+    fn parse_close_prompt_action_rejects_invalid_values() {
+        assert_eq!(
+            parse_close_prompt_action("minimize"),
+            Err("Invalid close action. Expected 'tray' or 'exit'.".to_string())
         );
     }
 
