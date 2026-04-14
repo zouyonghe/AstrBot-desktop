@@ -23,3 +23,11 @@ test('close confirm dialog avoids exposing raw invoke errors to users', async ()
   assert.doesNotMatch(html, /invokeError\.message/);
   assert.match(html, /error\.textContent = copy\.submitError;/);
 });
+
+test('close confirm dialog routes Tauri command calls through a local invoke wrapper', async () => {
+  const html = await readHtml();
+
+  assert.match(html, /const invokeTauri =/);
+  assert.doesNotMatch(html, /window\.__TAURI_INTERNALS__\.invoke\(/);
+  assert.match(html, /await invokeTauri\(/);
+});

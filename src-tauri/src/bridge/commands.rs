@@ -356,9 +356,10 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
             finish_tray_close_prompt_cleanup(cleanup_result, append_desktop_log)
         }
         CloseAction::Exit => {
-            let state = app_handle.state::<BackendState>();
-            state.mark_quitting();
-            app_handle.exit(0);
+            crate::lifecycle::events::request_immediate_exit(
+                &app_handle,
+                crate::lifecycle::events::ImmediateExitTrigger::ClosePromptExitAction,
+            );
             BackendBridgeResult {
                 ok: true,
                 reason: None,

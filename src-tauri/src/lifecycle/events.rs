@@ -3,6 +3,13 @@ use tauri::{AppHandle, Manager};
 use crate::{append_shutdown_log, lifecycle::cleanup, BackendState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImmediateExitTrigger {
+    SavedExitPreference,
+    ClosePromptExitAction,
+    TrayQuitRequest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExitRequestedDecision {
     AllowImmediateExit,
     RunBackendCleanupFirst,
@@ -14,6 +21,23 @@ fn decide_exit_requested_flow(has_exit_request_allowance: bool) -> ExitRequested
     } else {
         ExitRequestedDecision::RunBackendCleanupFirst
     }
+}
+
+pub(crate) fn immediate_exit_log_message(trigger: ImmediateExitTrigger) -> &'static str {
+    match trigger {
+        ImmediateExitTrigger::SavedExitPreference => {
+            "main window close requested with saved exit preference"
+        }
+        ImmediateExitTrigger::ClosePromptExitAction => "close prompt requested desktop exit",
+        ImmediateExitTrigger::TrayQuitRequest => "tray quit requested, exiting desktop process",
+    }
+}
+
+pub(crate) fn request_immediate_exit(app_handle: &AppHandle, trigger: ImmediateExitTrigger) {
+    let state = app_handle.state::<BackendState>();
+    state.mark_quitting();
+    append_shutdown_log(immediate_exit_log_message(trigger));
+    app_handle.exit(0);
 }
 
 pub fn handle_exit_requested(app_handle: &AppHandle, api: &tauri::ExitRequestApi) {
@@ -68,7 +92,10 @@ pub fn handle_exit_event(app_handle: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{decide_exit_requested_flow, ExitRequestedDecision};
+    use super::{
+        decide_exit_requested_flow, immediate_exit_log_message, ExitRequestedDecision,
+        ImmediateExitTrigger,
+    };
 
     #[test]
     fn decide_exit_requested_flow_allows_immediate_exit_when_allowance_exists() {
@@ -83,6 +110,22 @@ mod tests {
         assert_eq!(
             decide_exit_requested_flow(false),
             ExitRequestedDecision::RunBackendCleanupFirst
+        );
+    }
+
+    #[test]
+    fn immediate_exit_log_message_matches_all_immediate_exit_triggers() {
+        assert_eq!(
+            immediate_exit_log_message(ImmediateExitTrigger::SavedExitPreference),
+            "main window close requested with saved exit preference"
+        );
+        assert_eq!(
+            immediate_exit_log_message(ImmediateExitTrigger::ClosePromptExitAction),
+            "close prompt requested desktop exit"
+        );
+        assert_eq!(
+            immediate_exit_log_message(ImmediateExitTrigger::TrayQuitRequest),
+            "tray quit requested, exiting desktop process"
         );
     }
 }

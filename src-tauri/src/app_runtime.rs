@@ -4,9 +4,9 @@ use tauri::{
 };
 
 use crate::{
-    app_runtime_events, append_desktop_log, append_shutdown_log, append_startup_log, bridge,
-    close_behavior, lifecycle, startup_task, tray, window, BackendState, DEFAULT_SHELL_LOCALE,
-    DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
+    app_runtime_events, append_desktop_log, append_startup_log, bridge, close_behavior, lifecycle,
+    startup_task, tray, window, BackendState, DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE,
+    STARTUP_MODE_ENV,
 };
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
@@ -82,10 +82,10 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                 );
             }
             app_runtime_events::MainWindowAction::ExitApplication => {
-                let state = window.app_handle().state::<BackendState>();
-                state.mark_quitting();
-                append_shutdown_log("main window close requested with saved exit preference");
-                window.app_handle().exit(0);
+                lifecycle::events::request_immediate_exit(
+                    window.app_handle(),
+                    lifecycle::events::ImmediateExitTrigger::SavedExitPreference,
+                );
             }
             app_runtime_events::MainWindowAction::HideIfMinimized => {
                 window::actions::hide_main_window(

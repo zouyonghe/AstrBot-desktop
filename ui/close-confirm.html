@@ -195,6 +195,7 @@
       const trayButton = document.getElementById("tray-button");
       const exitButton = document.getElementById("exit-button");
       const error = document.getElementById("error");
+      const invokeTauri = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INTERNALS__?.invoke;
       let recoveryTimer = null;
 
       document.documentElement.lang = copy.lang;
@@ -223,7 +224,13 @@
         setPending(true);
 
         try {
-          const result = await window.__TAURI_INTERNALS__.invoke(
+          if (typeof invokeTauri !== "function") {
+            error.textContent = copy.submitError;
+            setPending(false);
+            return;
+          }
+
+          const result = await invokeTauri(
             "desktop_bridge_submit_close_prompt",
             { action, remember: remember.checked }
           );

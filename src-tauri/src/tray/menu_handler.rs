@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    append_desktop_log, append_restart_log, append_shutdown_log, restart_backend_flow,
+    append_desktop_log, append_restart_log, lifecycle, restart_backend_flow,
     tray::{actions, bridge_event},
     ui_dispatch, window, BackendState, DEFAULT_SHELL_LOCALE, TRAY_RESTART_BACKEND_EVENT,
 };
@@ -72,10 +72,10 @@ pub fn handle_tray_menu_event(app_handle: &AppHandle, menu_id: &str) {
             });
         }
         Some(actions::TrayMenuAction::Quit) => {
-            let state = app_handle.state::<BackendState>();
-            state.mark_quitting();
-            append_shutdown_log("tray quit requested, exiting desktop process");
-            app_handle.exit(0);
+            lifecycle::events::request_immediate_exit(
+                app_handle,
+                lifecycle::events::ImmediateExitTrigger::TrayQuitRequest,
+            );
         }
         None => {}
     }

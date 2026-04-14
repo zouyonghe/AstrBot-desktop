@@ -13,8 +13,11 @@ fn deserialize_close_action_option<'de, D>(deserializer: D) -> Result<Option<Clo
 where
     D: Deserializer<'de>,
 {
-    let raw = Option::<String>::deserialize(deserializer)?;
-    Ok(raw.as_deref().and_then(parse_close_action))
+    let raw = Option::<Value>::deserialize(deserializer)?;
+    Ok(match raw {
+        Some(Value::String(raw)) => parse_close_action(&raw),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -62,7 +65,7 @@ fn read_cached_close_action_at_path(state_path: &Path) -> Option<CloseAction> {
     state.close_action
 }
 
-fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+fn save_desktop_state(path: &Path, state: &DesktopState) -> Result<(), String> {
     if let Some(parent_dir) = path.parent() {
         fs::create_dir_all(parent_dir).map_err(|error| {
             format!(
@@ -72,12 +75,6 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
             )
         })?;
     }
-
-    Ok(())
-}
-
-fn save_state<T: Serialize>(path: &Path, state: &T) -> Result<(), String> {
-    ensure_parent_dir(path)?;
 
     let serialized = serde_json::to_string_pretty(state)
         .map_err(|error| format!("Failed to serialize close behavior state: {error}"))?;
@@ -149,7 +146,7 @@ fn write_cached_close_action_at_path(
     };
     state.close_action = action;
 
-    save_state(state_path, &state)?;
+    save_desktop_state(state_path, &state)?;
 
     Ok(())
 }
@@ -206,6 +203,17 @@ mod tests {
     fn load_desktop_state_treats_invalid_close_action_as_none_without_dropping_rest() {
         let state = load_desktop_state(
             r#"{"closeActionOnWindowClose":"bogus","locale":"en-US"}"#,
+            "test desktop state",
+        );
+
+        assert_eq!(state.close_action, None);
+        assert_eq!(state.rest.get("locale"), Some(&json!("en-US")));
+    }
+
+    #[test]
+    fn load_desktop_state_treats_non_string_close_action_as_none_without_dropping_rest() {
+        let state = load_desktop_state(
+            r#"{"closeActionOnWindowClose":true,"locale":"en-US"}"#,
             "test desktop state",
         );
 
