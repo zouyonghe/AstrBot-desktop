@@ -52,11 +52,14 @@ pub(crate) fn parse_close_action(raw: &str) -> Option<CloseAction> {
     }
 }
 
-fn load_desktop_state(raw: &str, log_subject: &str) -> DesktopState {
+fn load_desktop_state<F>(raw: &str, log_subject: &str, log: &F) -> DesktopState
+where
+    F: Fn(&str),
+{
     match serde_json::from_str::<DesktopState>(raw) {
         Ok(state) => state,
         Err(error) => {
-            crate::append_desktop_log(&format!(
+            log(&format!(
                 "failed to parse {log_subject}: {error}. resetting state semantics"
             ));
             DesktopState::default()
@@ -64,14 +67,23 @@ fn load_desktop_state(raw: &str, log_subject: &str) -> DesktopState {
     }
 }
 
-pub(crate) fn read_cached_close_action(packaged_root_dir: Option<&Path>) -> Option<CloseAction> {
+pub(crate) fn read_cached_close_action<F>(
+    packaged_root_dir: Option<&Path>,
+    log: F,
+) -> Option<CloseAction>
+where
+    F: Fn(&str),
+{
     let state_path = crate::desktop_state::resolve_desktop_state_path(packaged_root_dir)?;
-    read_cached_close_action_at_path(&state_path)
+    read_cached_close_action_at_path(&state_path, &log)
 }
 
-fn read_cached_close_action_at_path(state_path: &Path) -> Option<CloseAction> {
+fn read_cached_close_action_at_path<F>(state_path: &Path, log: &F) -> Option<CloseAction>
+where
+    F: Fn(&str),
+{
     let raw = fs::read_to_string(state_path).ok()?;
-    let state = load_desktop_state(&raw, "desktop close behavior state");
+    let state = load_desktop_state(&raw, "desktop close behavior state", log);
     state.close_action
 }
 
@@ -121,29 +133,36 @@ fn save_desktop_state(path: &Path, state: &DesktopState) -> Result<(), String> {
     })
 }
 
-pub(crate) fn write_cached_close_action(
+pub(crate) fn write_cached_close_action<F>(
     action: Option<CloseAction>,
     packaged_root_dir: Option<&Path>,
-) -> Result<(), String> {
+    log: F,
+) -> Result<(), String>
+where
+    F: Fn(&str),
+{
     let Some(state_path) = crate::desktop_state::resolve_desktop_state_path(packaged_root_dir)
     else {
-        crate::append_desktop_log(
-            "close behavior state path is unavailable; skipping close action persistence",
-        );
+        log("close behavior state path is unavailable; skipping close action persistence");
         return Ok(());
     };
 
-    write_cached_close_action_at_path(action, &state_path)
+    write_cached_close_action_at_path(action, &state_path, &log)
 }
 
-fn write_cached_close_action_at_path(
+fn write_cached_close_action_at_path<F>(
     action: Option<CloseAction>,
     state_path: &Path,
-) -> Result<(), String> {
+    log: &F,
+) -> Result<(), String>
+where
+    F: Fn(&str),
+{
     let mut state = match fs::read_to_string(state_path) {
         Ok(raw) => load_desktop_state(
             &raw,
             &format!("close behavior state {}", state_path.display()),
+            log,
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => DesktopState::default(),
         Err(error) => {
@@ -170,6 +189,8 @@ mod tests {
     use serde_json::json;
     use std::{fs, path::PathBuf};
 
+    fn noop_log(_: &str) {}
+
     fn state_path(temp_dir: &tempfile::TempDir) -> PathBuf {
         temp_dir.path().join("data").join("desktop_state.json")
     }
@@ -179,7 +200,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
 
         assert_eq!(
-            read_cached_close_action_at_path(&state_path(&temp_dir)),
+            read_cached_close_action_at_path(&state_path(&temp_dir), &noop_log),
             None
         );
     }
@@ -203,6 +224,7 @@ mod tests {
         let state = load_desktop_state(
             r#"{"closeActionOnWindowClose":"tray","locale":"zh-CN"}"#,
             "test desktop state",
+            &noop_log,
         );
 
         assert_eq!(state.close_action, Some(CloseAction::Tray));
@@ -214,6 +236,7 @@ mod tests {
         let state = load_desktop_state(
             r#"{"closeActionOnWindowClose":"bogus","locale":"en-US"}"#,
             "test desktop state",
+            &noop_log,
         );
 
         assert_eq!(state.close_action, None);
@@ -225,6 +248,7 @@ mod tests {
         let state = load_desktop_state(
             r#"{"closeActionOnWindowClose":true,"locale":"en-US"}"#,
             "test desktop state",
+            &noop_log,
         );
 
         assert_eq!(state.close_action, None);
@@ -242,6 +266,20 @@ mod tests {
     }
 
     #[test]
+    fn load_desktop_state_reports_parse_failures_through_callback() {
+        let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let captured_logs = std::rc::Rc::clone(&logs);
+
+        let state = load_desktop_state("[", "test desktop state", &move |message: &str| {
+            captured_logs.borrow_mut().push(message.to_string());
+        });
+
+        assert_eq!(state.close_action, None);
+        assert_eq!(logs.borrow().len(), 1);
+        assert!(logs.borrow()[0].contains("failed to parse test desktop state"));
+    }
+
+    #[test]
     fn write_cached_close_action_preserves_unrelated_state_fields() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let state_path = state_path(&temp_dir);
@@ -256,7 +294,7 @@ mod tests {
         )
         .expect("write state");
 
-        write_cached_close_action_at_path(Some(CloseAction::Tray), &state_path)
+        write_cached_close_action_at_path(Some(CloseAction::Tray), &state_path, &noop_log)
             .expect("write close action");
 
         let saved: serde_json::Value =
@@ -275,7 +313,7 @@ mod tests {
         fs::create_dir_all(state_path.parent().expect("state parent")).expect("create state dir");
         fs::write(&state_path, "[").expect("write malformed state");
 
-        write_cached_close_action_at_path(Some(CloseAction::Exit), &state_path)
+        write_cached_close_action_at_path(Some(CloseAction::Exit), &state_path, &noop_log)
             .expect("write close action");
 
         let saved: serde_json::Value =
@@ -290,11 +328,11 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let state_path = state_path(&temp_dir);
 
-        write_cached_close_action_at_path(Some(CloseAction::Tray), &state_path)
+        write_cached_close_action_at_path(Some(CloseAction::Tray), &state_path, &noop_log)
             .expect("write close action");
 
         assert_eq!(
-            read_cached_close_action_at_path(&state_path),
+            read_cached_close_action_at_path(&state_path, &noop_log),
             Some(CloseAction::Tray)
         );
     }
@@ -314,7 +352,8 @@ mod tests {
         )
         .expect("write state");
 
-        write_cached_close_action_at_path(None, &state_path).expect("clear close action");
+        write_cached_close_action_at_path(None, &state_path, &noop_log)
+            .expect("clear close action");
 
         let saved: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&state_path).expect("read updated state"))
@@ -331,6 +370,9 @@ mod tests {
         fs::create_dir_all(state_path.parent().expect("state parent")).expect("create state dir");
         fs::write(&state_path, "[").expect("write malformed state");
 
-        assert_eq!(read_cached_close_action_at_path(&state_path), None);
+        assert_eq!(
+            read_cached_close_action_at_path(&state_path, &noop_log),
+            None
+        );
     }
 }

@@ -25,8 +25,10 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
         let action = match &event {
             WindowEvent::CloseRequested { .. } => {
                 let packaged_root_dir = crate::runtime_paths::default_packaged_root_dir();
-                let saved_close_action =
-                    close_behavior::read_cached_close_action(packaged_root_dir.as_deref());
+                let saved_close_action = close_behavior::read_cached_close_action(
+                    packaged_root_dir.as_deref(),
+                    append_desktop_log,
+                );
 
                 app_runtime_events::main_window_action(
                     window.label(),

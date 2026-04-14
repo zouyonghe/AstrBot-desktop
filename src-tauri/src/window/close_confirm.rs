@@ -20,6 +20,24 @@ pub(crate) fn close_confirm_window_size() -> (f64, f64) {
     (CLOSE_CONFIRM_WINDOW_WIDTH, CLOSE_CONFIRM_WINDOW_HEIGHT)
 }
 
+fn handle_existing_window_operation_result<F>(
+    operation_result: Result<(), String>,
+    operation: &str,
+    log: F,
+) -> Result<(), String>
+where
+    F: Fn(&str),
+{
+    match operation_result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let message = format!("failed to {operation} close confirm window: {error}");
+            log(&message);
+            Err(message)
+        }
+    }
+}
+
 pub(crate) fn show_close_confirm_window<F>(
     app_handle: &AppHandle,
     default_shell_locale: &'static str,
@@ -29,17 +47,21 @@ where
     F: Fn(&str),
 {
     if let Some(window) = app_handle.get_webview_window(CLOSE_CONFIRM_WINDOW_LABEL) {
-        if let Err(error) = window.unminimize() {
-            log(&format!(
-                "failed to unminimize close confirm window: {error}"
-            ));
-        }
-        if let Err(error) = window.show() {
-            log(&format!("failed to show close confirm window: {error}"));
-        }
-        if let Err(error) = window.set_focus() {
-            log(&format!("failed to focus close confirm window: {error}"));
-        }
+        handle_existing_window_operation_result(
+            window.unminimize().map_err(|error| error.to_string()),
+            "unminimize",
+            &log,
+        )?;
+        handle_existing_window_operation_result(
+            window.show().map_err(|error| error.to_string()),
+            "show",
+            &log,
+        )?;
+        handle_existing_window_operation_result(
+            window.set_focus().map_err(|error| error.to_string()),
+            "focus",
+            &log,
+        )?;
         return Ok(());
     }
 
@@ -65,7 +87,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_close_confirm_path, close_confirm_window_size};
+    use super::{
+        build_close_confirm_path, close_confirm_window_size,
+        handle_existing_window_operation_result,
+    };
 
     #[test]
     fn build_close_confirm_path_appends_locale_query() {
@@ -78,5 +103,28 @@ mod tests {
     #[test]
     fn close_confirm_window_size_fits_desktop_dialog_without_clipping() {
         assert_eq!(close_confirm_window_size(), (420.0, 320.0));
+    }
+
+    #[test]
+    fn handle_existing_window_operation_result_returns_err_after_logging_failure() {
+        let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let captured_logs = std::rc::Rc::clone(&logs);
+
+        let result = handle_existing_window_operation_result(
+            Err("focus failed".to_string()),
+            "focus",
+            move |message: &str| {
+                captured_logs.borrow_mut().push(message.to_string());
+            },
+        );
+
+        assert_eq!(
+            result,
+            Err("failed to focus close confirm window: focus failed".to_string())
+        );
+        assert_eq!(
+            logs.borrow().as_slice(),
+            ["failed to focus close confirm window: focus failed"]
+        );
     }
 }

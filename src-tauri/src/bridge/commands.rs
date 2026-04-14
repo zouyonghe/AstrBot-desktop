@@ -162,8 +162,13 @@ fn parse_openable_url(raw_url: &str) -> Result<Url, String> {
 }
 
 fn parse_close_prompt_action(raw_action: &str) -> Result<CloseAction, String> {
-    close_behavior::parse_close_action(raw_action)
-        .ok_or_else(|| "Invalid close action. Expected 'tray' or 'exit'.".to_string())
+    close_behavior::parse_close_action(raw_action).ok_or_else(|| {
+        format!(
+            "Invalid close action. Expected '{}' or '{}'.",
+            close_behavior::CLOSE_ACTION_TRAY,
+            close_behavior::CLOSE_ACTION_EXIT,
+        )
+    })
 }
 
 fn finish_tray_close_prompt_cleanup<Log>(
@@ -328,9 +333,11 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
 
     if remember {
         let packaged_root_dir = runtime_paths::default_packaged_root_dir();
-        if let Err(error) =
-            close_behavior::write_cached_close_action(Some(action), packaged_root_dir.as_deref())
-        {
+        if let Err(error) = close_behavior::write_cached_close_action(
+            Some(action),
+            packaged_root_dir.as_deref(),
+            append_desktop_log,
+        ) {
             append_desktop_log(&format!(
                 "failed to persist remembered close action; continuing with selected action: {error}"
             ));
