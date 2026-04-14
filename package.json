@@ -12,5 +12,8 @@
     "prepare:resources": "pnpm run prepare:webui && pnpm run prepare:backend",
     "dev": "cargo tauri dev",
     "build": "cargo tauri build"
+  },
+  "devDependencies": {
+    "yaml": "^2.8.1"
   }
 }
