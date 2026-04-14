@@ -166,6 +166,25 @@ fn parse_close_prompt_action(raw_action: &str) -> Result<CloseAction, String> {
         .ok_or_else(|| "Invalid close action. Expected 'tray' or 'exit'.".to_string())
 }
 
+fn finish_tray_close_prompt_cleanup<Log>(
+    cleanup_result: Result<(), String>,
+    log: Log,
+) -> BackendBridgeResult
+where
+    Log: Fn(&str),
+{
+    if let Err(error) = cleanup_result {
+        log(&format!(
+            "Failed to close close confirm prompt window: {error}"
+        ));
+    }
+
+    BackendBridgeResult {
+        ok: true,
+        reason: None,
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn open_url_with_system_browser(url: &str) -> Result<(), String> {
     Command::new("open")
@@ -327,21 +346,14 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
                 DEFAULT_SHELL_LOCALE,
                 append_desktop_log,
             );
-            if let Some(prompt_window) = app_handle.get_webview_window("close-confirm") {
-                if let Err(error) = prompt_window.close() {
-                    let reason = format!("Failed to close close confirm prompt window: {error}");
-                    append_desktop_log(&reason);
-                    return BackendBridgeResult {
-                        ok: false,
-                        reason: Some(reason),
-                    };
-                }
-            }
+            let cleanup_result =
+                if let Some(prompt_window) = app_handle.get_webview_window("close-confirm") {
+                    prompt_window.close().map_err(|error| error.to_string())
+                } else {
+                    Ok(())
+                };
 
-            BackendBridgeResult {
-                ok: true,
-                reason: None,
-            }
+            finish_tray_close_prompt_cleanup(cleanup_result, append_desktop_log)
         }
         CloseAction::Exit => {
             let state = app_handle.state::<BackendState>();
@@ -550,6 +562,36 @@ mod tests {
             parse_close_prompt_action("minimize"),
             Err("Invalid close action. Expected 'tray' or 'exit'.".to_string())
         );
+    }
+
+    #[test]
+    fn finish_tray_close_prompt_cleanup_logs_failures_without_failing_result() {
+        let logs = Rc::new(RefCell::new(Vec::new()));
+        let captured_logs = Rc::clone(&logs);
+
+        let result =
+            finish_tray_close_prompt_cleanup(Err("close failed".to_string()), move |message| {
+                captured_logs.borrow_mut().push(message.to_string());
+            });
+
+        assert!(result.ok);
+        assert_eq!(result.reason, None);
+        assert_eq!(logs.borrow().len(), 1);
+        assert!(logs.borrow()[0].contains("close failed"));
+    }
+
+    #[test]
+    fn finish_tray_close_prompt_cleanup_returns_success_without_logs_for_clean_close() {
+        let logs = Rc::new(RefCell::new(Vec::new()));
+        let captured_logs = Rc::clone(&logs);
+
+        let result = finish_tray_close_prompt_cleanup(Ok(()), move |message| {
+            captured_logs.borrow_mut().push(message.to_string());
+        });
+
+        assert!(result.ok);
+        assert_eq!(result.reason, None);
+        assert!(logs.borrow().is_empty());
     }
 
     #[test]

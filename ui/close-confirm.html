@@ -201,8 +201,8 @@
       document.getElementById("title").textContent = copy.title;
       document.getElementById("description").textContent = copy.description;
       document.getElementById("remember-label").textContent = copy.remember;
-      trayButton.textContent = locale === "zh-CN" ? copy.tray : "Minimize to tray";
-      exitButton.textContent = locale === "zh-CN" ? copy.exit : "Exit now";
+      trayButton.textContent = copy.tray;
+      exitButton.textContent = copy.exit;
 
       function setPending(pending) {
         trayButton.disabled = pending;
@@ -245,12 +245,8 @@
           if (typeof window.close === "function") {
             window.close();
           }
-        } catch (invokeError) {
-          const message =
-            invokeError && typeof invokeError === "object" && "message" in invokeError
-              ? String(invokeError.message)
-              : String(invokeError || copy.submitError);
-          error.textContent = message;
+        } catch (_invokeError) {
+          error.textContent = copy.submitError;
           setPending(false);
         }
       }
