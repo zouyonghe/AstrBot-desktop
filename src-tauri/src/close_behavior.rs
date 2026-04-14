@@ -147,8 +147,9 @@ where
 {
     let Some(state_path) = crate::desktop_state::resolve_desktop_state_path(packaged_root_dir)
     else {
-        log("close behavior state path is unavailable; skipping close action persistence");
-        return Ok(());
+        let message = "close behavior state path is unavailable; skipping close action persistence";
+        log(message);
+        return Err(message.to_string());
     };
 
     write_cached_close_action_at_path(action, &state_path, &log)
@@ -377,6 +378,19 @@ mod tests {
         assert_eq!(
             read_cached_close_action_at_path(&state_path, &noop_log),
             None
+        );
+    }
+
+    #[test]
+    fn write_cached_close_action_errors_when_state_path_is_unavailable() {
+        let result = super::write_cached_close_action(Some(CloseAction::Tray), None, &noop_log);
+
+        assert_eq!(
+            result,
+            Err(
+                "close behavior state path is unavailable; skipping close action persistence"
+                    .to_string()
+            )
         );
     }
 }

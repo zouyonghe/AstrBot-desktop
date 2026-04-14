@@ -339,8 +339,12 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
             append_desktop_log,
         ) {
             append_desktop_log(&format!(
-                "failed to persist remembered close action; continuing with selected action: {error}"
+                "failed to persist remembered close action; aborting selected action: {error}"
             ));
+            return BackendBridgeResult {
+                ok: false,
+                reason: Some(error),
+            };
         }
     }
 
@@ -362,6 +366,15 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
             finish_tray_close_prompt_cleanup(cleanup_result, append_desktop_log)
         }
         CloseAction::Exit => {
+            if let Some(prompt_window) =
+                app_handle.get_webview_window(window::close_confirm::CLOSE_CONFIRM_WINDOW_LABEL)
+            {
+                if let Err(error) = prompt_window.close() {
+                    append_desktop_log(&format!(
+                        "Failed to close confirm prompt window before exit: {error}"
+                    ));
+                }
+            }
             crate::lifecycle::events::request_immediate_exit(
                 &app_handle,
                 crate::lifecycle::events::ImmediateExitTrigger::ClosePromptExitAction,

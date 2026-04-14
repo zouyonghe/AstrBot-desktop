@@ -40,3 +40,11 @@ test('close confirm dialog reads close action values from query params instead o
   assert.doesNotMatch(html, /submit\("tray"\)/);
   assert.doesNotMatch(html, /submit\("exit"\)/);
 });
+
+test('close confirm dialog only schedules frontend close fallback for tray actions', async () => {
+  const html = await readHtml();
+
+  assert.match(html, /if \(action === trayAction\) \{/);
+  assert.match(html, /recoveryTimer = window\.setTimeout\(/);
+  assert.match(html, /window\.close\(\);/);
+});

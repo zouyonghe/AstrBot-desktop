@@ -243,16 +243,18 @@
             return;
           }
 
-          recoveryTimer = window.setTimeout(() => {
-            recoveryTimer = null;
-            if (document.visibilityState !== "hidden") {
-              error.textContent = copy.submitStalled;
-              setPending(false);
-            }
-          }, 1500);
+          if (action === trayAction) {
+            recoveryTimer = window.setTimeout(() => {
+              recoveryTimer = null;
+              if (document.visibilityState !== "hidden") {
+                error.textContent = copy.submitStalled;
+                setPending(false);
+              }
+            }, 1500);
 
-          if (typeof window.close === "function") {
-            window.close();
+            if (typeof window.close === "function") {
+              window.close();
+            }
           }
         } catch (_invokeError) {
           error.textContent = copy.submitError;
