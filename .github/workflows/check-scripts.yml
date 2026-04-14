@@ -24,6 +24,11 @@ jobs:
           node-version: '20'
           python-version: '3.12'
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 10.28.2
+
       - name: Check Node scripts syntax
         run: |
           set -euo pipefail
@@ -32,9 +37,14 @@ jobs:
             exit 0
           fi
           while IFS= read -r -d '' file; do
-            echo "Checking ${file}"
-            node --check "${file}"
+           echo "Checking ${file}"
+           node --check "${file}"
           done < <(find scripts -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' \) -print0 | sort -z)
+
+      - name: Install Node test dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
 
       - name: Run Node script behavior tests
         run: |
