@@ -175,7 +175,7 @@ where
 {
     if let Err(error) = cleanup_result {
         log(&format!(
-            "Failed to close close confirm prompt window: {error}"
+            "Failed to close confirm prompt window: {error}"
         ));
     }
 
