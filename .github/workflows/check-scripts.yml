@@ -37,8 +37,8 @@ jobs:
             exit 0
           fi
           while IFS= read -r -d '' file; do
-           echo "Checking ${file}"
-           node --check "${file}"
+            echo "Checking ${file}"
+            node --check "${file}"
           done < <(find scripts -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' \) -print0 | sort -z)
 
       - name: Install Node test dependencies
