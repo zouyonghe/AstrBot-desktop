@@ -22,6 +22,8 @@ jobs:
         uses: ./.github/actions/setup-toolchains
         with:
           node-version: '20'
+          node-cache: 'pnpm'
+          node-cache-dependency-path: pnpm-lock.yaml
           python-version: '3.12'
 
       - name: Setup pnpm
@@ -44,7 +46,7 @@ jobs:
       - name: Install Node test dependencies
         run: |
           set -euo pipefail
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Run Node script behavior tests
         run: |

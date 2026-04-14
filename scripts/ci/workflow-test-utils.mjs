@@ -7,11 +7,21 @@ import { parse } from 'yaml';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, '..', '..');
 const workflowsDir = path.join(projectRoot, '.github', 'workflows');
+const actionsDir = path.join(projectRoot, '.github', 'actions');
+
+const readYamlObject = async (targetPath) => {
+  const content = await readFile(targetPath, 'utf8');
+  return parse(content);
+};
 
 export const readWorkflowObject = async (workflowFileName) => {
   const workflowPath = path.join(workflowsDir, workflowFileName);
-  const content = await readFile(workflowPath, 'utf8');
-  return parse(content);
+  return readYamlObject(workflowPath);
+};
+
+export const readActionObject = async (actionDirName) => {
+  const actionPath = path.join(actionsDir, actionDirName, 'action.yml');
+  return readYamlObject(actionPath);
 };
 
 export const extractWorkflowJobSteps = (workflowObject, jobName) => {
@@ -32,4 +42,17 @@ export const findStepIndex = (steps, predicate, label) => {
   const index = steps.findIndex(predicate);
   assert.notEqual(index, -1, `Expected workflow step ${String(label)} to exist.`);
   return index;
+};
+
+export const extractCompositeActionSteps = (actionObject, actionLabel) => {
+  assert.equal(
+    actionObject.runs?.using,
+    'composite',
+    `Expected action ${actionLabel} to be a composite action.`,
+  );
+  assert.ok(
+    Array.isArray(actionObject.runs?.steps),
+    `Expected action ${actionLabel} to define composite steps.`,
+  );
+  return actionObject.runs.steps;
 };
