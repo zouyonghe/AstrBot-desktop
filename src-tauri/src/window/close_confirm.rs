@@ -1,11 +1,15 @@
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-const CLOSE_CONFIRM_WINDOW_LABEL: &str = "close-confirm";
+pub(crate) const CLOSE_CONFIRM_WINDOW_LABEL: &str = "close-confirm";
 const CLOSE_CONFIRM_WINDOW_WIDTH: f64 = 420.0;
 const CLOSE_CONFIRM_WINDOW_HEIGHT: f64 = 320.0;
 
 pub(crate) fn build_close_confirm_path(locale: &str) -> String {
-    format!("close-confirm.html?locale={locale}")
+    format!(
+        "close-confirm.html?locale={locale}&trayAction={}&exitAction={}",
+        crate::close_behavior::CLOSE_ACTION_TRAY,
+        crate::close_behavior::CLOSE_ACTION_EXIT,
+    )
 }
 
 fn build_close_confirm_url(locale: &str) -> WebviewUrl {
@@ -67,7 +71,7 @@ mod tests {
     fn build_close_confirm_path_appends_locale_query() {
         assert_eq!(
             build_close_confirm_path("en-US"),
-            "close-confirm.html?locale=en-US"
+            "close-confirm.html?locale=en-US&trayAction=tray&exitAction=exit"
         );
     }
 

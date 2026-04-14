@@ -1,6 +1,9 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de::IgnoredAny, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use std::{fs, io::Write, path::Path};
+
+pub(crate) const CLOSE_ACTION_TRAY: &str = "tray";
+pub(crate) const CLOSE_ACTION_EXIT: &str = "exit";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -13,9 +16,16 @@ fn deserialize_close_action_option<'de, D>(deserializer: D) -> Result<Option<Clo
 where
     D: Deserializer<'de>,
 {
-    let raw = Option::<Value>::deserialize(deserializer)?;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RawCloseAction {
+        String(String),
+        Other(IgnoredAny),
+    }
+
+    let raw = Option::<RawCloseAction>::deserialize(deserializer)?;
     Ok(match raw {
-        Some(Value::String(raw)) => parse_close_action(&raw),
+        Some(RawCloseAction::String(raw)) => parse_close_action(&raw),
         _ => None,
     })
 }
@@ -36,8 +46,8 @@ struct DesktopState {
 
 pub(crate) fn parse_close_action(raw: &str) -> Option<CloseAction> {
     match raw {
-        "tray" => Some(CloseAction::Tray),
-        "exit" => Some(CloseAction::Exit),
+        CLOSE_ACTION_TRAY => Some(CloseAction::Tray),
+        CLOSE_ACTION_EXIT => Some(CloseAction::Exit),
         _ => None,
     }
 }

@@ -190,12 +190,14 @@
 
       const params = new URLSearchParams(window.location.search);
       const locale = params.get("locale") === "zh-CN" ? "zh-CN" : "en-US";
+      const trayAction = params.get("trayAction");
+      const exitAction = params.get("exitAction");
       const copy = messages[locale];
       const remember = document.getElementById("remember");
       const trayButton = document.getElementById("tray-button");
       const exitButton = document.getElementById("exit-button");
       const error = document.getElementById("error");
-      const invokeTauri = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INTERNALS__?.invoke;
+      const invokeTauri = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
       let recoveryTimer = null;
 
       document.documentElement.lang = copy.lang;
@@ -224,7 +226,7 @@
         setPending(true);
 
         try {
-          if (typeof invokeTauri !== "function") {
+          if (typeof action !== "string" || action.length === 0 || typeof invokeTauri !== "function") {
             error.textContent = copy.submitError;
             setPending(false);
             return;
@@ -265,8 +267,8 @@
       });
       window.addEventListener("pagehide", clearRecoveryTimer);
 
-      trayButton.addEventListener("click", () => submit("tray"));
-      exitButton.addEventListener("click", () => submit("exit"));
+      trayButton.addEventListener("click", () => submit(trayAction));
+      exitButton.addEventListener("click", () => submit(exitAction));
     </script>
   </body>
 </html>

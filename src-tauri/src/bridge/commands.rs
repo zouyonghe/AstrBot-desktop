@@ -174,9 +174,7 @@ where
     Log: Fn(&str),
 {
     if let Err(error) = cleanup_result {
-        log(&format!(
-            "Failed to close confirm prompt window: {error}"
-        ));
+        log(&format!("Failed to close confirm prompt window: {error}"));
     }
 
     BackendBridgeResult {
@@ -346,12 +344,13 @@ pub(crate) fn desktop_bridge_submit_close_prompt(
                 DEFAULT_SHELL_LOCALE,
                 append_desktop_log,
             );
-            let cleanup_result =
-                if let Some(prompt_window) = app_handle.get_webview_window("close-confirm") {
-                    prompt_window.close().map_err(|error| error.to_string())
-                } else {
-                    Ok(())
-                };
+            let cleanup_result = if let Some(prompt_window) =
+                app_handle.get_webview_window(window::close_confirm::CLOSE_CONFIRM_WINDOW_LABEL)
+            {
+                prompt_window.close().map_err(|error| error.to_string())
+            } else {
+                Ok(())
+            };
 
             finish_tray_close_prompt_cleanup(cleanup_result, append_desktop_log)
         }

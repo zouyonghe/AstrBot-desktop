@@ -28,6 +28,15 @@ test('close confirm dialog routes Tauri command calls through a local invoke wra
   const html = await readHtml();
 
   assert.match(html, /const invokeTauri =/);
-  assert.doesNotMatch(html, /window\.__TAURI_INTERNALS__\.invoke\(/);
+  assert.doesNotMatch(html, /window\.__TAURI_INTERNALS__\?\.invoke/);
   assert.match(html, /await invokeTauri\(/);
+});
+
+test('close confirm dialog reads close action values from query params instead of hard-coded literals', async () => {
+  const html = await readHtml();
+
+  assert.match(html, /const trayAction = params\.get\("trayAction"\);/);
+  assert.match(html, /const exitAction = params\.get\("exitAction"\);/);
+  assert.doesNotMatch(html, /submit\("tray"\)/);
+  assert.doesNotMatch(html, /submit\("exit"\)/);
 });
