@@ -66,11 +66,6 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                     append_desktop_log(&format!(
                         "failed to open close confirm prompt window: {error}"
                     ));
-                    window::actions::hide_main_window(
-                        window.app_handle(),
-                        DEFAULT_SHELL_LOCALE,
-                        append_desktop_log,
-                    );
                 }
             }
             app_runtime_events::MainWindowAction::PreventCloseAndHide => {
