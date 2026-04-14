@@ -13,8 +13,8 @@ fn deserialize_close_action_option<'de, D>(deserializer: D) -> Result<Option<Clo
 where
     D: Deserializer<'de>,
 {
-    let value = Option::<Value>::deserialize(deserializer)?;
-    Ok(value.and_then(|value| serde_json::from_value::<CloseAction>(value).ok()))
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.as_deref().and_then(parse_close_action))
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -32,7 +32,11 @@ struct DesktopState {
 }
 
 pub(crate) fn parse_close_action(raw: &str) -> Option<CloseAction> {
-    serde_json::from_value(Value::String(raw.to_string())).ok()
+    match raw {
+        "tray" => Some(CloseAction::Tray),
+        "exit" => Some(CloseAction::Exit),
+        _ => None,
+    }
 }
 
 fn load_desktop_state(raw: &str, log_subject: &str) -> DesktopState {

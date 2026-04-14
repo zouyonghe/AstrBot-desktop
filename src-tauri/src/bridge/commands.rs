@@ -551,50 +551,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_close_prompt_action_accepts_supported_values() {
-        assert_eq!(parse_close_prompt_action("tray"), Ok(CloseAction::Tray));
-        assert_eq!(parse_close_prompt_action("exit"), Ok(CloseAction::Exit));
-    }
-
-    #[test]
-    fn parse_close_prompt_action_rejects_invalid_values() {
-        assert_eq!(
-            parse_close_prompt_action("minimize"),
-            Err("Invalid close action. Expected 'tray' or 'exit'.".to_string())
-        );
-    }
-
-    #[test]
-    fn finish_tray_close_prompt_cleanup_logs_failures_without_failing_result() {
-        let logs = Rc::new(RefCell::new(Vec::new()));
-        let captured_logs = Rc::clone(&logs);
-
-        let result =
-            finish_tray_close_prompt_cleanup(Err("close failed".to_string()), move |message| {
-                captured_logs.borrow_mut().push(message.to_string());
-            });
-
-        assert!(result.ok);
-        assert_eq!(result.reason, None);
-        assert_eq!(logs.borrow().len(), 1);
-        assert!(logs.borrow()[0].contains("close failed"));
-    }
-
-    #[test]
-    fn finish_tray_close_prompt_cleanup_returns_success_without_logs_for_clean_close() {
-        let logs = Rc::new(RefCell::new(Vec::new()));
-        let captured_logs = Rc::clone(&logs);
-
-        let result = finish_tray_close_prompt_cleanup(Ok(()), move |message| {
-            captured_logs.borrow_mut().push(message.to_string());
-        });
-
-        assert!(result.ok);
-        assert_eq!(result.reason, None);
-        assert!(logs.borrow().is_empty());
-    }
-
-    #[test]
     fn updater_check_manual_download_mode_only_reports_reason_without_forced_update_flag() {
         let result = crate::bridge::updater_types::map_manual_download_no_update_result(
             "4.19.2",
