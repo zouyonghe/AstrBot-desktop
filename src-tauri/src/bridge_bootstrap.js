@@ -711,7 +711,13 @@
   };
 
   const ensureDefaultChatTransportMode = () => {
-    const storage = window.localStorage;
+    let storage;
+    try {
+      storage = window.localStorage;
+    } catch (error) {
+      warnDefaultChatTransportModeError('storage', error);
+      return;
+    }
     if (!storage) return;
 
     let existingTransportMode;

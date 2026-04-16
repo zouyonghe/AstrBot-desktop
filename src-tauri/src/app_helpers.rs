@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     backend, bridge, logging, runtime_paths, window, BackendState, LaunchPlan, DESKTOP_LOG_FILE,
-    DESKTOP_LOG_MAX_BYTES, LOG_BACKUP_COUNT, TRAY_RESTART_BACKEND_EVENT,
+    DESKTOP_LOG_MAX_BYTES, LOG_BACKUP_COUNT,
 };
 
 static DESKTOP_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -19,7 +19,7 @@ pub(crate) fn navigate_main_window_to_backend(app_handle: &AppHandle) -> Result<
 }
 
 pub(crate) fn inject_desktop_bridge(webview: &tauri::Webview<tauri::Wry>) {
-    bridge::desktop::inject_desktop_bridge(webview, TRAY_RESTART_BACKEND_EVENT, append_desktop_log);
+    bridge::desktop::inject_desktop_bridge(webview, append_desktop_log);
 }
 
 pub(crate) fn backend_path_override() -> Option<OsString> {

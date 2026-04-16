@@ -23,6 +23,11 @@ if (
 
 const CHAT_TRANSPORT_STORAGE_KEY_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_STORAGE_KEY);
 const CHAT_TRANSPORT_WEBSOCKET_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_WEBSOCKET);
+const CHAT_TRANSPORT_READ_HINT =
+  `Expected chat UI to read localStorage["${CHAT_TRANSPORT_MODE_STORAGE_KEY}"] ` +
+  `and recognize "${CHAT_TRANSPORT_MODE_WEBSOCKET}".`;
+const CHAT_TRANSPORT_WRITE_HINT =
+  `Expected chat UI to persist transport mode via localStorage.setItem("${CHAT_TRANSPORT_MODE_STORAGE_KEY}", ...).`;
 
 const DESKTOP_BRIDGE_PATTERNS = {
   trayRestartGuard: /if\s*\(\s*!desktopBridge\s*\?\.\s*onTrayRestartBackend\s*\)\s*\{/,
@@ -98,23 +103,21 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
     filePath: ['src', 'components', 'chat', 'Chat.vue'],
     pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
     label: 'chat transport preference read',
-    hint:
-      'Expected chat UI to read localStorage["chat.transportMode"] and recognize "websocket".',
+    hint: CHAT_TRANSPORT_READ_HINT,
     required: true,
   },
   {
     filePath: ['src', 'components', 'chat', 'Chat.vue'],
     pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceWrite,
     label: 'chat transport preference write',
-    hint: 'Expected chat UI to persist transport mode via localStorage.setItem("chat.transportMode", ...).',
+    hint: CHAT_TRANSPORT_WRITE_HINT,
     required: true,
   },
   {
     filePath: ['src', 'components', 'chat', 'StandaloneChat.vue'],
     pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
     label: 'standalone chat transport preference read',
-    hint:
-      'Expected standalone chat UI to read localStorage["chat.transportMode"] and recognize "websocket".',
+    hint: CHAT_TRANSPORT_READ_HINT,
     required: true,
   },
 ];
