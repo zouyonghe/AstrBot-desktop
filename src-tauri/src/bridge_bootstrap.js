@@ -703,7 +703,7 @@
     try {
       const storage = window.localStorage;
       if (!storage) return;
-      if (storage.getItem(CHAT_TRANSPORT_MODE_STORAGE_KEY)) return;
+      if (storage.getItem(CHAT_TRANSPORT_MODE_STORAGE_KEY) !== null) return;
       storage.setItem(
         CHAT_TRANSPORT_MODE_STORAGE_KEY,
         CHAT_TRANSPORT_MODE_WEBSOCKET,
