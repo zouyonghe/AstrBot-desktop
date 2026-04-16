@@ -1,4 +1,6 @@
 (() => {
+  if (typeof window === 'undefined') return;
+
   const existingTrayRestartState = window.__astrbotDesktopTrayRestartState;
   if (
     window.astrbotDesktop &&
@@ -148,11 +150,10 @@
 
   const TOKEN_STORAGE_KEY = 'token';
   const SHELL_LOCALE_STORAGE_KEY = 'astrbot-locale';
-  // Mirror AstrBot dashboard transport persistence. Resource preparation verifies
-  // the upstream ChatUI still recognizes this storage contract before packaging.
+  // Values are injected from the shared desktop bridge transport contract.
   const CHAT_TRANSPORT = Object.freeze({
-    STORAGE_KEY: 'chat.transportMode',
-    WEBSOCKET: 'websocket',
+    STORAGE_KEY: '{CHAT_TRANSPORT_MODE_STORAGE_KEY}',
+    WEBSOCKET: '{CHAT_TRANSPORT_MODE_WEBSOCKET}',
   });
   const STORAGE_SYNC_PATCHED_FLAG = '__astrbotDesktopStorageSyncPatched';
   const LEGACY_TOKEN_SYNC_PATCHED_FLAG = '__astrbotDesktopTokenSyncPatched';

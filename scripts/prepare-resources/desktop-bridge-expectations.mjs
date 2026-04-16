@@ -1,7 +1,25 @@
+import { readFileSync } from 'node:fs';
+
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const CHAT_TRANSPORT_MODE_STORAGE_KEY = 'chat.transportMode';
-const CHAT_TRANSPORT_MODE_WEBSOCKET = 'websocket';
+const chatTransportContractPath = new URL(
+  '../../src-tauri/src/desktop_bridge_chat_transport_contract.json',
+  import.meta.url,
+);
+const chatTransportContract = JSON.parse(readFileSync(chatTransportContractPath, 'utf8'));
+const CHAT_TRANSPORT_MODE_STORAGE_KEY = chatTransportContract.storageKey;
+const CHAT_TRANSPORT_MODE_WEBSOCKET = chatTransportContract.websocketValue;
+
+if (
+  typeof CHAT_TRANSPORT_MODE_STORAGE_KEY !== 'string' ||
+  !CHAT_TRANSPORT_MODE_STORAGE_KEY ||
+  typeof CHAT_TRANSPORT_MODE_WEBSOCKET !== 'string' ||
+  !CHAT_TRANSPORT_MODE_WEBSOCKET
+) {
+  throw new Error(
+    'desktop bridge chat transport contract must define non-empty string storageKey and websocketValue fields',
+  );
+}
 
 const CHAT_TRANSPORT_STORAGE_KEY_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_STORAGE_KEY);
 const CHAT_TRANSPORT_WEBSOCKET_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_WEBSOCKET);
