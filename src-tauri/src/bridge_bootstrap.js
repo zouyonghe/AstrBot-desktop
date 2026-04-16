@@ -148,6 +148,8 @@
 
   const TOKEN_STORAGE_KEY = 'token';
   const SHELL_LOCALE_STORAGE_KEY = 'astrbot-locale';
+  const CHAT_TRANSPORT_MODE_STORAGE_KEY = 'chat.transportMode';
+  const CHAT_TRANSPORT_MODE_WEBSOCKET = 'websocket';
   const STORAGE_SYNC_PATCHED_FLAG = '__astrbotDesktopStorageSyncPatched';
   const LEGACY_TOKEN_SYNC_PATCHED_FLAG = '__astrbotDesktopTokenSyncPatched';
 
@@ -697,6 +699,18 @@
     } catch {}
   };
 
+  const ensureDefaultChatTransportMode = () => {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return;
+      if (storage.getItem(CHAT_TRANSPORT_MODE_STORAGE_KEY)) return;
+      storage.setItem(
+        CHAT_TRANSPORT_MODE_STORAGE_KEY,
+        CHAT_TRANSPORT_MODE_WEBSOCKET,
+      );
+    } catch {}
+  };
+
   window.astrbotDesktop = {
     __tauriBridge: true,
     isDesktop: true,
@@ -740,6 +754,7 @@
   installNavigationBridges();
   void listenToTrayRestartBackendEvent();
   patchLocalStorageBridgeSync();
+  ensureDefaultChatTransportMode();
   void syncAuthToken();
   void syncShellLocale();
 })();
