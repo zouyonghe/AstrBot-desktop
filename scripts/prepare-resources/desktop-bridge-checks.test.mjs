@@ -16,6 +16,11 @@ test('getDesktopBridgeExpectations returns stable expectation metadata', () => {
   assert.ok(expectations.length > 0);
   assert.ok(expectations.some((expectation) => expectation.required === true));
   assert.ok(expectations.some((expectation) => expectation.required === false));
+  assert.ok(expectations.some((expectation) => expectation.label === 'chat transport preference read'));
+  assert.ok(expectations.some((expectation) => expectation.label === 'chat transport preference write'));
+  assert.ok(
+    expectations.some((expectation) => expectation.label === 'standalone chat transport preference read'),
+  );
 
   for (const expectation of expectations) {
     assert.equal(Array.isArray(expectation.filePath), true);

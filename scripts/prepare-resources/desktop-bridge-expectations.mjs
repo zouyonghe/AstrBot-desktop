@@ -1,3 +1,11 @@
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const CHAT_TRANSPORT_MODE_STORAGE_KEY = 'chat.transportMode';
+const CHAT_TRANSPORT_MODE_WEBSOCKET = 'websocket';
+
+const CHAT_TRANSPORT_STORAGE_KEY_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_STORAGE_KEY);
+const CHAT_TRANSPORT_WEBSOCKET_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_WEBSOCKET);
+
 const DESKTOP_BRIDGE_PATTERNS = {
   trayRestartGuard: /if\s*\(\s*!desktopBridge\s*\?\.\s*onTrayRestartBackend\s*\)\s*\{/,
   trayRestartPromptInvoke:
@@ -10,6 +18,12 @@ const DESKTOP_BRIDGE_PATTERNS = {
     /const\s+runtimeInfo\s*=\s*await\s+getDesktopRuntimeInfo\s*\(\s*\)\s*;?[\s\S]*?isDesktopReleaseMode\.value\s*=\s*runtimeInfo\.isDesktopRuntime/,
   desktopReleaseModeFlag: /\bisDesktopReleaseMode\b/,
   desktopRuntimeProbeWarn: /console\.warn\([\s\S]*desktop runtime/i,
+  chatTransportPreferenceRead: new RegExp(
+    `localStorage\\.getItem\\(["']${CHAT_TRANSPORT_STORAGE_KEY_PATTERN}["']\\)[\\s\\S]*?["']${CHAT_TRANSPORT_WEBSOCKET_PATTERN}["']`,
+  ),
+  chatTransportPreferenceWrite: new RegExp(
+    `localStorage\\.setItem\\(["']${CHAT_TRANSPORT_STORAGE_KEY_PATTERN}["']\\s*,`,
+  ),
 };
 
 const DESKTOP_BRIDGE_EXPECTATIONS = [
@@ -61,6 +75,29 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
     label: 'desktop runtime probe warning',
     hint: 'Expected warning log when desktop runtime detection fails.',
     required: false,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'Chat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
+    label: 'chat transport preference read',
+    hint:
+      'Expected chat UI to read localStorage["chat.transportMode"] and recognize "websocket".',
+    required: true,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'Chat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceWrite,
+    label: 'chat transport preference write',
+    hint: 'Expected chat UI to persist transport mode via localStorage.setItem("chat.transportMode", ...).',
+    required: true,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'StandaloneChat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
+    label: 'standalone chat transport preference read',
+    hint:
+      'Expected standalone chat UI to read localStorage["chat.transportMode"] and recognize "websocket".',
+    required: true,
   },
 ];
 
