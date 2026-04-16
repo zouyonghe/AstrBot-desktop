@@ -1,3 +1,34 @@
+import { readFileSync } from 'node:fs';
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const chatTransportContractPath = new URL(
+  '../../src-tauri/src/desktop_bridge_chat_transport_contract.json',
+  import.meta.url,
+);
+const chatTransportContract = JSON.parse(readFileSync(chatTransportContractPath, 'utf8'));
+const CHAT_TRANSPORT_MODE_STORAGE_KEY = chatTransportContract.storageKey;
+const CHAT_TRANSPORT_MODE_WEBSOCKET = chatTransportContract.websocketValue;
+
+if (
+  typeof CHAT_TRANSPORT_MODE_STORAGE_KEY !== 'string' ||
+  !CHAT_TRANSPORT_MODE_STORAGE_KEY ||
+  typeof CHAT_TRANSPORT_MODE_WEBSOCKET !== 'string' ||
+  !CHAT_TRANSPORT_MODE_WEBSOCKET
+) {
+  throw new Error(
+    'desktop bridge chat transport contract must define non-empty string storageKey and websocketValue fields',
+  );
+}
+
+const CHAT_TRANSPORT_STORAGE_KEY_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_STORAGE_KEY);
+const CHAT_TRANSPORT_WEBSOCKET_PATTERN = escapeRegex(CHAT_TRANSPORT_MODE_WEBSOCKET);
+const CHAT_TRANSPORT_READ_HINT =
+  `Expected chat UI to read localStorage["${CHAT_TRANSPORT_MODE_STORAGE_KEY}"] ` +
+  `and recognize "${CHAT_TRANSPORT_MODE_WEBSOCKET}".`;
+const CHAT_TRANSPORT_WRITE_HINT =
+  `Expected chat UI to persist transport mode via localStorage.setItem("${CHAT_TRANSPORT_MODE_STORAGE_KEY}", ...).`;
+
 const DESKTOP_BRIDGE_PATTERNS = {
   trayRestartGuard: /if\s*\(\s*!desktopBridge\s*\?\.\s*onTrayRestartBackend\s*\)\s*\{/,
   trayRestartPromptInvoke:
@@ -10,6 +41,12 @@ const DESKTOP_BRIDGE_PATTERNS = {
     /const\s+runtimeInfo\s*=\s*await\s+getDesktopRuntimeInfo\s*\(\s*\)\s*;?[\s\S]*?isDesktopReleaseMode\.value\s*=\s*runtimeInfo\.isDesktopRuntime/,
   desktopReleaseModeFlag: /\bisDesktopReleaseMode\b/,
   desktopRuntimeProbeWarn: /console\.warn\([\s\S]*desktop runtime/i,
+  chatTransportPreferenceRead: new RegExp(
+    `localStorage\\.getItem\\(["']${CHAT_TRANSPORT_STORAGE_KEY_PATTERN}["']\\)[\\s\\S]*?["']${CHAT_TRANSPORT_WEBSOCKET_PATTERN}["']`,
+  ),
+  chatTransportPreferenceWrite: new RegExp(
+    `localStorage\\.setItem\\(["']${CHAT_TRANSPORT_STORAGE_KEY_PATTERN}["']\\s*,`,
+  ),
 };
 
 const DESKTOP_BRIDGE_EXPECTATIONS = [
@@ -61,6 +98,27 @@ const DESKTOP_BRIDGE_EXPECTATIONS = [
     label: 'desktop runtime probe warning',
     hint: 'Expected warning log when desktop runtime detection fails.',
     required: false,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'Chat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
+    label: 'chat transport preference read',
+    hint: CHAT_TRANSPORT_READ_HINT,
+    required: true,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'Chat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceWrite,
+    label: 'chat transport preference write',
+    hint: CHAT_TRANSPORT_WRITE_HINT,
+    required: true,
+  },
+  {
+    filePath: ['src', 'components', 'chat', 'StandaloneChat.vue'],
+    pattern: DESKTOP_BRIDGE_PATTERNS.chatTransportPreferenceRead,
+    label: 'standalone chat transport preference read',
+    hint: CHAT_TRANSPORT_READ_HINT,
+    required: true,
   },
 ];
 

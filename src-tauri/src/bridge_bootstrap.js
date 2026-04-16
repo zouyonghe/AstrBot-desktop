@@ -1,4 +1,6 @@
 (() => {
+  if (typeof window === 'undefined') return;
+
   const existingTrayRestartState = window.__astrbotDesktopTrayRestartState;
   if (
     window.astrbotDesktop &&
@@ -148,6 +150,11 @@
 
   const TOKEN_STORAGE_KEY = 'token';
   const SHELL_LOCALE_STORAGE_KEY = 'astrbot-locale';
+  // Values are injected from the shared desktop bridge transport contract.
+  const CHAT_TRANSPORT = Object.freeze({
+    STORAGE_KEY: '{CHAT_TRANSPORT_MODE_STORAGE_KEY}',
+    WEBSOCKET: '{CHAT_TRANSPORT_MODE_WEBSOCKET}',
+  });
   const STORAGE_SYNC_PATCHED_FLAG = '__astrbotDesktopStorageSyncPatched';
   const LEGACY_TOKEN_SYNC_PATCHED_FLAG = '__astrbotDesktopTokenSyncPatched';
 
@@ -198,6 +205,12 @@
     devWarn('[astrbotDesktop] openExternalUrl bridge failure', {
       phase,
       url,
+      error,
+    });
+  };
+  const warnDefaultChatTransportModeError = (phase, error) => {
+    devWarn('[astrbotDesktop] failed to seed default chat transport mode', {
+      phase,
       error,
     });
   };
@@ -697,6 +710,32 @@
     } catch {}
   };
 
+  const ensureDefaultChatTransportMode = () => {
+    let storage;
+    try {
+      storage = window.localStorage;
+    } catch (error) {
+      warnDefaultChatTransportModeError('storage', error);
+      return;
+    }
+    if (!storage) return;
+
+    let existingTransportMode;
+    try {
+      existingTransportMode = storage.getItem(CHAT_TRANSPORT.STORAGE_KEY);
+    } catch (error) {
+      warnDefaultChatTransportModeError('read', error);
+      return;
+    }
+    if (existingTransportMode !== null) return;
+
+    try {
+      storage.setItem(CHAT_TRANSPORT.STORAGE_KEY, CHAT_TRANSPORT.WEBSOCKET);
+    } catch (error) {
+      warnDefaultChatTransportModeError('write', error);
+    }
+  };
+
   window.astrbotDesktop = {
     __tauriBridge: true,
     isDesktop: true,
@@ -740,6 +779,7 @@
   installNavigationBridges();
   void listenToTrayRestartBackendEvent();
   patchLocalStorageBridgeSync();
+  ensureDefaultChatTransportMode();
   void syncAuthToken();
   void syncShellLocale();
 })();
