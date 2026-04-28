@@ -57,7 +57,7 @@ jobs:
 
       - name: Cache Cargo registry, git, and target
         if: steps.detect-tauri.outputs.has_tauri == 'true'
-        uses: actions/cache@v5.0.3
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
