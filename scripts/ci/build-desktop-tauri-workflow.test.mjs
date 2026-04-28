@@ -9,6 +9,7 @@ import {
 
 const WORKFLOW_FILE = 'build-desktop-tauri.yml';
 const BUILD_MACOS_JOB = 'build-macos';
+const RELEASE_JOB = 'release';
 const PREPARE_RESOURCES_RUN = /pnpm run prepare:resources/;
 const PRESIGN_BACKEND_RUN = /codesign-macos-nested\.sh\s+"resources\/backend"/;
 const BUILD_APP_BUNDLE_RUN = /cargo tauri build --verbose --target/;
@@ -66,5 +67,20 @@ test('macOS workflow prepares resources before optional pre-signing', async () =
   assert.match(
     buildStep.run,
     /Resources are already prepared/,
+  );
+});
+
+test('release workflow disables generated release notes for nightly builds', async () => {
+  const workflowObject = await readWorkflowObject(WORKFLOW_FILE);
+  const steps = extractWorkflowJobSteps(workflowObject, RELEASE_JOB);
+  const releaseStep = findStep(
+    steps,
+    'Create or update release',
+    (step) => step.name === 'Create or update release' && /^softprops\/action-gh-release@/.test(step.uses ?? ''),
+  );
+
+  assert.equal(
+    releaseStep.with?.generate_release_notes,
+    "${{ needs.resolve_build_context.outputs.build_mode != 'nightly' }}",
   );
 });

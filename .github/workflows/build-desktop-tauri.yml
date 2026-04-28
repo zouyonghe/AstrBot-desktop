@@ -687,7 +687,7 @@ jobs:
             - Mode: `${{ needs.resolve_build_context.outputs.build_mode }}`
             - Windows package formats: `nsis installer` and `portable zip`.
             - Windows portable zip uses manual replacement updates and requires WebView2 to already exist on the host.
-          generate_release_notes: true
+          generate_release_notes: ${{ needs.resolve_build_context.outputs.build_mode != 'nightly' }}
           prerelease: ${{ needs.resolve_build_context.outputs.release_prerelease == 'true' }}
           make_latest: ${{ needs.resolve_build_context.outputs.release_make_latest == 'true' }}
           overwrite_files: true
