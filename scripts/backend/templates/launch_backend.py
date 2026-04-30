@@ -15,6 +15,7 @@ APP_DIR = BACKEND_DIR / "app"
 _WINDOWS_DLL_DIRECTORY_HANDLES: list[object] = []
 # Keep this in sync with BACKEND_STARTUP_HEARTBEAT_PATH_ENV in src-tauri/src/app_constants.rs.
 STARTUP_HEARTBEAT_ENV = "ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH"
+RUNTIME_CORE_LOCK_ENV = "ASTRBOT_DESKTOP_CORE_LOCK_PATH"
 STARTUP_HEARTBEAT_INTERVAL_SECONDS = 2.0
 STARTUP_HEARTBEAT_STOP_JOIN_TIMEOUT_SECONDS = 1.0
 
@@ -220,11 +221,18 @@ def start_startup_heartbeat() -> None:
     atexit.register(on_exit)
 
 
+def configure_runtime_core_lock_path() -> None:
+    lock_path = APP_DIR / "runtime-core-lock.json"
+    if lock_path.is_file():
+        os.environ.setdefault(RUNTIME_CORE_LOCK_ENV, str(lock_path))
+
+
 def main() -> None:
     configure_stdio_utf8()
     configure_windows_dll_search_path()
     preload_windows_runtime_dlls()
     start_startup_heartbeat()
+    configure_runtime_core_lock_path()
 
     sys.path.insert(0, str(APP_DIR))
 

@@ -19,6 +19,7 @@ import {
   pruneLinuxTkinterRuntime,
 } from './runtime-linux-compat-utils.mjs';
 import { isWindowsArm64BundledRuntime } from './runtime-arch-utils.mjs';
+import { generateRuntimeCoreLock } from './runtime-core-lock.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..', '..');
@@ -29,6 +30,7 @@ const outputDir = path.join(projectRoot, 'resources', 'backend');
 const appDir = path.join(outputDir, 'app');
 const runtimeDir = path.join(outputDir, 'python');
 const manifestPath = path.join(outputDir, 'runtime-manifest.json');
+const runtimeCoreLockPath = path.join(appDir, 'runtime-core-lock.json');
 const launcherPath = path.join(outputDir, 'launch_backend.py');
 const launcherTemplatePath = path.join(__dirname, 'templates', 'launch_backend.py');
 const importScannerScriptPath = path.join(__dirname, 'tools', 'scan_imports.py');
@@ -613,6 +615,10 @@ const main = () => {
   copyAppSources(resolvedSourceDir);
   const runtimePython = prepareRuntimeExecutable(runtimeSourceReal);
   installRuntimeDependencies(runtimePython);
+  generateRuntimeCoreLock({
+    runtimePython,
+    outputPath: runtimeCoreLockPath,
+  });
   pruneLinuxTkinterRuntime(runtimeDir);
   patchLinuxRuntimeRpaths(runtimeDir);
   writeLauncherScript();
