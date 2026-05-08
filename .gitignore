@@ -10,6 +10,7 @@ runtime/
 # generated resources
 resources/backend/
 resources/webui/
+docs/plans/
 
 # rust/tauri build outputs
 src-tauri/target/
