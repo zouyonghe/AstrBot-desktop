@@ -16,6 +16,16 @@ fn decide_exit_requested_flow(has_exit_request_allowance: bool) -> ExitRequested
     }
 }
 
+fn stop_backend_then_exit(app_handle: &AppHandle, trigger: cleanup::ExitTrigger) {
+    let app_handle_cloned = app_handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle_cloned.state::<BackendState>();
+        cleanup::stop_backend_for_exit(&state, trigger, append_shutdown_log);
+        state.allow_next_exit_request();
+        app_handle_cloned.exit(0);
+    });
+}
+
 pub fn handle_exit_requested(app_handle: &AppHandle, api: &tauri::ExitRequestApi) {
     let state = app_handle.state::<BackendState>();
     match decide_exit_requested_flow(state.take_exit_request_allowance()) {
@@ -35,17 +45,7 @@ pub fn handle_exit_requested(app_handle: &AppHandle, api: &tauri::ExitRequestApi
     }
 
     append_shutdown_log("exit requested, stopping backend asynchronously");
-    let app_handle_cloned = app_handle.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app_handle_cloned.state::<BackendState>();
-        cleanup::stop_backend_for_exit(
-            &state,
-            cleanup::ExitTrigger::ExitRequested,
-            append_shutdown_log,
-        );
-        state.allow_next_exit_request();
-        app_handle_cloned.exit(0);
-    });
+    stop_backend_then_exit(app_handle, cleanup::ExitTrigger::ExitRequested);
 }
 
 pub fn handle_tray_quit(app_handle: &AppHandle) {
@@ -57,13 +57,7 @@ pub fn handle_tray_quit(app_handle: &AppHandle) {
     }
 
     append_shutdown_log("tray quit requested, stopping backend asynchronously");
-    let app_handle_cloned = app_handle.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app_handle_cloned.state::<BackendState>();
-        cleanup::stop_backend_for_exit(&state, cleanup::ExitTrigger::TrayQuit, append_shutdown_log);
-        state.allow_next_exit_request();
-        app_handle_cloned.exit(0);
-    });
+    stop_backend_then_exit(app_handle, cleanup::ExitTrigger::TrayQuit);
 }
 
 pub fn handle_exit_event(app_handle: &AppHandle) {

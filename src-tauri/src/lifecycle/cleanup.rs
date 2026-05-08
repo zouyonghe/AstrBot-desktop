@@ -62,9 +62,9 @@ pub fn stop_backend_for_exit<F>(state: &BackendState, trigger: ExitTrigger, log:
 where
     F: Fn(&str),
 {
-    let stop_failure_prefix = stop_failure_prefix(trigger);
+    let failure_prefix = stop_failure_prefix(trigger);
     if let Err(error) = state.stop_backend() {
-        log(&format!("{stop_failure_prefix}: {error}"));
+        log(&format!("{failure_prefix}: {error}"));
     }
 
     if matches!(trigger, ExitTrigger::ExitRequested | ExitTrigger::TrayQuit) {
