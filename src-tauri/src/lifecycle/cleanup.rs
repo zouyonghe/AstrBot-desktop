@@ -4,6 +4,25 @@ use crate::BackendState;
 pub enum ExitTrigger {
     ExitRequested,
     ExitFallback,
+    TrayQuit,
+}
+
+fn duplicate_cleanup_message(trigger: ExitTrigger) -> &'static str {
+    match trigger {
+        ExitTrigger::ExitRequested => "exit requested while backend cleanup is already running",
+        ExitTrigger::ExitFallback => {
+            "exit fallback cleanup skipped: backend cleanup already running"
+        }
+        ExitTrigger::TrayQuit => "tray quit while backend cleanup is already running",
+    }
+}
+
+fn stop_failure_prefix(trigger: ExitTrigger) -> &'static str {
+    match trigger {
+        ExitTrigger::ExitRequested => "backend graceful stop on ExitRequested failed",
+        ExitTrigger::ExitFallback => "backend fallback stop on Exit failed",
+        ExitTrigger::TrayQuit => "backend graceful stop on tray quit failed",
+    }
 }
 
 pub fn try_begin_exit_cleanup<F>(state: &BackendState, trigger: ExitTrigger, log: F) -> bool
@@ -14,13 +33,7 @@ where
         return true;
     }
 
-    let message = match trigger {
-        ExitTrigger::ExitRequested => "exit requested while backend cleanup is already running",
-        ExitTrigger::ExitFallback => {
-            "exit fallback cleanup skipped: backend cleanup already running"
-        }
-    };
-    log(message);
+    log(duplicate_cleanup_message(trigger));
     false
 }
 
@@ -28,15 +41,33 @@ pub fn stop_backend_for_exit<F>(state: &BackendState, trigger: ExitTrigger, log:
 where
     F: Fn(&str),
 {
-    let stop_failure_prefix = match trigger {
-        ExitTrigger::ExitRequested => "backend graceful stop on ExitRequested failed",
-        ExitTrigger::ExitFallback => "backend fallback stop on Exit failed",
-    };
+    let failure_prefix = stop_failure_prefix(trigger);
     if let Err(error) = state.stop_backend() {
-        log(&format!("{stop_failure_prefix}: {error}"));
+        log(&format!("{failure_prefix}: {error}"));
     }
 
-    if matches!(trigger, ExitTrigger::ExitRequested) {
+    if matches!(trigger, ExitTrigger::ExitRequested | ExitTrigger::TrayQuit) {
         log("backend stop finished, exiting desktop process");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{duplicate_cleanup_message, ExitTrigger};
+
+    #[test]
+    fn duplicate_cleanup_message_describes_tray_quit_trigger() {
+        assert_eq!(
+            duplicate_cleanup_message(ExitTrigger::TrayQuit),
+            "tray quit while backend cleanup is already running"
+        );
+    }
+
+    #[test]
+    fn stop_failure_prefix_describes_tray_quit_trigger() {
+        assert_eq!(
+            super::stop_failure_prefix(ExitTrigger::TrayQuit),
+            "backend graceful stop on tray quit failed"
+        );
     }
 }
