@@ -96,29 +96,47 @@ Not really. AstrBot Desktop is intended for local desktop usage and personal wor
 <!-- faq: lan-webui-access -->
 ### How can I access the WebUI from another device on my LAN?
 
-AstrBot Desktop listens on `127.0.0.1:6185` by default, so only the local machine can access the WebUI. If you explicitly want LAN access, set the dashboard host to `0.0.0.0`.
+AstrBot Desktop listens on `127.0.0.1:6185` by default, so only the local machine can access the WebUI. If you explicitly want LAN access, set the dashboard host to `0.0.0.0` in the desktop config file.
 
-Windows PowerShell:
+Config file path:
 
-```powershell
-setx ASTRBOT_DASHBOARD_HOST 0.0.0.0
-setx ASTRBOT_DASHBOARD_PORT 6185
+```text
+~/.astrbot/data/config/desktop.json
 ```
 
-Fully quit and restart AstrBot Desktop after changing the variables, then visit this URL from another device:
+On Windows, this is usually:
+
+```text
+C:\Users\<username>\.astrbot\data\config\desktop.json
+```
+
+Write this content:
+
+```json
+{
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 6185
+  }
+}
+```
+
+Fully quit and restart AstrBot Desktop after saving the file, then visit this URL from another device:
 
 ```text
 http://<LAN IP of the machine running AstrBot Desktop>:6185/
 ```
 
-On macOS / Linux, set the same environment variables before launching AstrBot Desktop:
+To restore local-only access, remove the `dashboard` config or set `host` back to `127.0.0.1`, then restart the app.
+
+Environment variables still work as advanced overrides and take precedence over `desktop.json`:
 
 ```bash
-export ASTRBOT_DASHBOARD_HOST=0.0.0.0
-export ASTRBOT_DASHBOARD_PORT=6185
+ASTRBOT_DASHBOARD_HOST=0.0.0.0
+ASTRBOT_DASHBOARD_PORT=6185
 ```
 
-Before enabling LAN access, make sure your system firewall allows port `6185`, and do not expose the port on untrusted networks or the public internet. To restore local-only access, remove the environment variables or set `ASTRBOT_DASHBOARD_HOST` back to `127.0.0.1`, then restart the app.
+Before enabling LAN access, make sure your system firewall allows port `6185`, and do not expose the port on untrusted networks or the public internet.
 
 <!-- faq: macos-quarantine -->
 ### macOS says the app is damaged or cannot be opened

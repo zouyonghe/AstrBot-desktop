@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::OsStr,
     fs::{self, OpenOptions},
+    path::Path,
     process::{Command, Stdio},
 };
 
@@ -26,6 +27,13 @@ const ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str =
 const DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str = "DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH";
 const DEFAULT_DASHBOARD_HOST: &str = "127.0.0.1";
 const DEFAULT_DASHBOARD_PORT: &str = "6185";
+const DESKTOP_CONFIG_RELATIVE_PATH: &str = "data/config/desktop.json";
+
+#[derive(Debug, Default)]
+struct DesktopDashboardConfig {
+    host: Option<String>,
+    port: Option<String>,
+}
 
 fn sanitize_packaged_python_environment<F>(command: &mut Command, log: F)
 where
@@ -43,28 +51,111 @@ where
     command.env("PYTHONNOUSERSITE", "1");
 }
 
-fn configure_desktop_dashboard_environment(command: &mut Command) {
+fn configure_desktop_dashboard_environment<F>(
+    command: &mut Command,
+    root_dir: Option<&Path>,
+    log: F,
+) where
+    F: FnMut(&str),
+{
     let dashboard_host_env = env::var_os(DASHBOARD_HOST_ENV);
     let astrbot_dashboard_host_env = env::var_os(ASTRBOT_DASHBOARD_HOST_ENV);
     let dashboard_port_env = env::var_os(DASHBOARD_PORT_ENV);
     let astrbot_dashboard_port_env = env::var_os(ASTRBOT_DASHBOARD_PORT_ENV);
     let astrbot_skip_auth_env = env::var_os(ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV);
     let legacy_skip_auth_env = env::var_os(DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV);
+    let desktop_config = read_desktop_dashboard_config(root_dir, log);
+    let config_host = desktop_config.host.as_deref().map(OsStr::new);
 
     let effective_host = dashboard_host_env
         .as_deref()
-        .or(astrbot_dashboard_host_env.as_deref());
+        .or(astrbot_dashboard_host_env.as_deref())
+        .or(config_host);
     let has_explicit_skip_auth = astrbot_skip_auth_env.is_some() || legacy_skip_auth_env.is_some();
 
     if dashboard_host_env.is_none() && astrbot_dashboard_host_env.is_none() {
-        command.env(DASHBOARD_HOST_ENV, DEFAULT_DASHBOARD_HOST);
+        command.env(
+            DASHBOARD_HOST_ENV,
+            desktop_config
+                .host
+                .as_deref()
+                .unwrap_or(DEFAULT_DASHBOARD_HOST),
+        );
     }
     if dashboard_port_env.is_none() && astrbot_dashboard_port_env.is_none() {
-        command.env(DASHBOARD_PORT_ENV, DEFAULT_DASHBOARD_PORT);
+        command.env(
+            DASHBOARD_PORT_ENV,
+            desktop_config
+                .port
+                .as_deref()
+                .unwrap_or(DEFAULT_DASHBOARD_PORT),
+        );
     }
     if should_skip_default_password_auth(has_explicit_skip_auth, effective_host) {
         command.env(ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, "true");
     }
+}
+
+fn read_desktop_dashboard_config<F>(root_dir: Option<&Path>, mut log: F) -> DesktopDashboardConfig
+where
+    F: FnMut(&str),
+{
+    let Some(root_dir) = root_dir else {
+        return DesktopDashboardConfig::default();
+    };
+    let config_path = root_dir.join(DESKTOP_CONFIG_RELATIVE_PATH);
+    if !config_path.is_file() {
+        return DesktopDashboardConfig::default();
+    }
+
+    let raw = match fs::read_to_string(&config_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            log(&format!(
+                "failed to read desktop config {}: {}",
+                config_path.display(),
+                error
+            ));
+            return DesktopDashboardConfig::default();
+        }
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            log(&format!(
+                "failed to parse desktop config {}: {}",
+                config_path.display(),
+                error
+            ));
+            return DesktopDashboardConfig::default();
+        }
+    };
+    let dashboard = parsed.get("dashboard");
+    DesktopDashboardConfig {
+        host: dashboard
+            .and_then(|value| value.get("host"))
+            .and_then(parse_dashboard_host),
+        port: dashboard
+            .and_then(|value| value.get("port"))
+            .and_then(parse_dashboard_port),
+    }
+}
+
+fn parse_dashboard_host(value: &serde_json::Value) -> Option<String> {
+    let host = value.as_str()?.trim();
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+fn parse_dashboard_port(value: &serde_json::Value) -> Option<String> {
+    if let Some(port) = value.as_u64() {
+        if (1..=65535).contains(&port) {
+            return Some(port.to_string());
+        }
+        return None;
+    }
+    let port = value.as_str()?.trim();
+    let parsed = port.parse::<u16>().ok()?;
+    (parsed > 0).then(|| port.to_string())
 }
 
 fn should_skip_default_password_auth(
@@ -164,7 +255,11 @@ impl BackendState {
         if let Some(path_override) = backend_path_override() {
             command.env("PATH", path_override);
         }
-        configure_desktop_dashboard_environment(&mut command);
+        configure_desktop_dashboard_environment(
+            &mut command,
+            plan.root_dir.as_deref(),
+            append_desktop_log,
+        );
         #[cfg(target_os = "windows")]
         {
             if plan.packaged_mode {
@@ -261,6 +356,8 @@ mod tests {
     use std::{
         env,
         ffi::{OsStr, OsString},
+        fs,
+        path::Path,
         process::Command,
         sync::Mutex,
     };
@@ -272,7 +369,8 @@ mod tests {
         configure_desktop_dashboard_environment, sanitize_packaged_python_environment,
         ASTRBOT_DASHBOARD_HOST_ENV, ASTRBOT_DASHBOARD_PORT_ENV,
         ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DASHBOARD_HOST_ENV, DASHBOARD_PORT_ENV,
-        DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST,
+        DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT,
+        DESKTOP_CONFIG_RELATIVE_PATH,
     };
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -364,7 +462,7 @@ mod tests {
         with_clean_dashboard_env(|| {
             let mut command = Command::new("sh");
 
-            configure_desktop_dashboard_environment(&mut command);
+            configure_desktop_dashboard_environment(&mut command, None, |_| {});
 
             assert_eq!(
                 get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
@@ -385,7 +483,7 @@ mod tests {
             env::set_var(DASHBOARD_PORT_ENV, "7000");
             let mut command = Command::new("sh");
 
-            configure_desktop_dashboard_environment(&mut command);
+            configure_desktop_dashboard_environment(&mut command, None, |_| {});
 
             assert_eq!(
                 get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
@@ -402,7 +500,7 @@ mod tests {
             env::set_var(DASHBOARD_HOST_ENV, "0.0.0.0");
             let mut command = Command::new("sh");
 
-            configure_desktop_dashboard_environment(&mut command);
+            configure_desktop_dashboard_environment(&mut command, None, |_| {});
 
             assert_eq!(
                 get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
@@ -418,13 +516,86 @@ mod tests {
             env::set_var(DASHBOARD_HOST_ENV, std::ffi::OsString::from_vec(vec![0xff]));
             let mut command = Command::new("sh");
 
-            configure_desktop_dashboard_environment(&mut command);
+            configure_desktop_dashboard_environment(&mut command, None, |_| {});
 
             assert_eq!(
                 get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
                 None
             );
             assert_eq!(get_command_env_value(&command, DASHBOARD_HOST_ENV), None);
+        });
+    }
+
+    fn write_desktop_config(root: &Path, contents: &str) {
+        let config_path = root.join(DESKTOP_CONFIG_RELATIVE_PATH);
+        fs::create_dir_all(config_path.parent().expect("config parent"))
+            .expect("create config dir");
+        fs::write(config_path, contents).expect("write desktop config");
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_reads_desktop_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_desktop_config(
+                root.path(),
+                r#"{"dashboard":{"host":"0.0.0.0","port":6185}}"#,
+            );
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), |_| {});
+
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some("0.0.0.0".to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_PORT_ENV),
+                Some(Some("6185".to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
+                None
+            );
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_env_overrides_desktop_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_desktop_config(
+                root.path(),
+                r#"{"dashboard":{"host":"0.0.0.0","port":6185}}"#,
+            );
+            env::set_var(DASHBOARD_HOST_ENV, "localhost");
+            env::set_var(DASHBOARD_PORT_ENV, "7000");
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), |_| {});
+
+            assert_eq!(get_command_env_value(&command, DASHBOARD_HOST_ENV), None);
+            assert_eq!(get_command_env_value(&command, DASHBOARD_PORT_ENV), None);
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_ignores_invalid_desktop_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_desktop_config(root.path(), r#"{"dashboard":{"host":" ","port":70000}}"#);
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), |_| {});
+
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some(DEFAULT_DASHBOARD_HOST.to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_PORT_ENV),
+                Some(Some(DEFAULT_DASHBOARD_PORT.to_string()))
+            );
         });
     }
 }
