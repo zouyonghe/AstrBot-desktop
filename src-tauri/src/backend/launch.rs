@@ -24,7 +24,7 @@ const ASTRBOT_DASHBOARD_PORT_ENV: &str = "ASTRBOT_DASHBOARD_PORT";
 const ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str =
     "ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH";
 const DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str = "DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH";
-const DEFAULT_DASHBOARD_HOST: &str = "0.0.0.0";
+const DEFAULT_DASHBOARD_HOST: &str = "127.0.0.1";
 const DEFAULT_DASHBOARD_PORT: &str = "6185";
 
 fn sanitize_packaged_python_environment<F>(command: &mut Command, log: F)
@@ -51,11 +51,9 @@ fn configure_desktop_dashboard_environment(command: &mut Command) {
     let astrbot_skip_auth_env = env::var_os(ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV);
     let legacy_skip_auth_env = env::var_os(DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV);
 
-    let default_dashboard_host = OsStr::new(DEFAULT_DASHBOARD_HOST);
     let effective_host = dashboard_host_env
         .as_deref()
-        .or(astrbot_dashboard_host_env.as_deref())
-        .or(Some(default_dashboard_host));
+        .or(astrbot_dashboard_host_env.as_deref());
     let has_explicit_skip_auth = astrbot_skip_auth_env.is_some() || legacy_skip_auth_env.is_some();
 
     if dashboard_host_env.is_none() && astrbot_dashboard_host_env.is_none() {
@@ -362,19 +360,19 @@ mod tests {
     }
 
     #[test]
-    fn configure_desktop_dashboard_environment_uses_lan_accessible_host_by_default() {
+    fn configure_desktop_dashboard_environment_enables_local_setup_without_default_password() {
         with_clean_dashboard_env(|| {
             let mut command = Command::new("sh");
 
             configure_desktop_dashboard_environment(&mut command);
 
             assert_eq!(
-                get_command_env_value(&command, DASHBOARD_HOST_ENV),
-                Some(Some(DEFAULT_DASHBOARD_HOST.to_string()))
+                get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
+                Some(Some("true".to_string()))
             );
             assert_eq!(
-                get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
-                None
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some(DEFAULT_DASHBOARD_HOST.to_string()))
             );
         });
     }
