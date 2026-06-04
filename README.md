@@ -93,6 +93,51 @@ If you need to migrate data between the desktop app and a source-based deploymen
 
 Not really. AstrBot Desktop is intended for local desktop usage and personal workflows. If you need long-running, stable server deployment, use the upstream AstrBot source, Docker, or panel-based deployment instead.
 
+<!-- faq: lan-webui-access -->
+### How can I access the WebUI from another device on my LAN?
+
+AstrBot Desktop listens on `127.0.0.1:6185` by default, so only the local machine can access the WebUI. If you explicitly want LAN access, set the dashboard host to `0.0.0.0` in AstrBot's command config.
+
+Config file path:
+
+```text
+~/.astrbot/data/cmd_config.json
+```
+
+On Windows, this is usually:
+
+```text
+C:\Users\<username>\.astrbot\data\cmd_config.json
+```
+
+Write this content:
+
+```json
+{
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 6185
+  }
+}
+```
+
+Fully quit and restart AstrBot Desktop after saving the file, then visit this URL from another device:
+
+```text
+http://<LAN IP of the machine running AstrBot Desktop>:6185/
+```
+
+To restore local-only access, set `dashboard.host` back to `127.0.0.1`, then restart the app.
+
+Environment variables still work as advanced overrides and take precedence over `cmd_config.json`:
+
+```bash
+ASTRBOT_DASHBOARD_HOST=0.0.0.0
+ASTRBOT_DASHBOARD_PORT=6185
+```
+
+Before enabling LAN access, make sure your system firewall allows port `6185`, and do not expose the port on untrusted networks or the public internet.
+
 <!-- faq: macos-quarantine -->
 ### macOS says the app is damaged or cannot be opened
 

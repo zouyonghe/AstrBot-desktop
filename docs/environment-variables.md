@@ -56,6 +56,29 @@
 | `ASTRBOT_DESKTOP_CLIENT` | 标记桌面客户端环境 | 打包态启动后端时写入 `1` |
 | `ASTRBOT_BACKEND_STARTUP_HEARTBEAT_PATH` | 桌面端写给后端启动器的 heartbeat 文件路径 | 打包态默认写到 `ASTRBOT_ROOT/data/backend-startup-heartbeat.json` |
 
+### 局域网访问 WebUI
+
+桌面端默认写入 `DASHBOARD_HOST=127.0.0.1`，因此 WebUI 默认仅允许本机访问。如果需要从同一局域网内的其他设备访问，推荐编辑 AstrBot 命令配置：
+
+```text
+~/.astrbot/data/cmd_config.json
+```
+
+Windows 对应路径通常为 `C:\Users\<用户名>\.astrbot\data\cmd_config.json`。
+
+```json
+{
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 6185
+  }
+}
+```
+
+设置后需要完全退出并重新启动 AstrBot Desktop，再通过 `http://<主机内网 IP>:6185/` 访问。开启前请确认系统防火墙允许端口 `6185`，并避免在不可信网络或公网环境暴露该端口。如需恢复默认本机访问，可将 `dashboard.host` 设回 `127.0.0.1` 后重启应用。
+
+环境变量优先级高于 `cmd_config.json`。如果同时设置了 `ASTRBOT_DASHBOARD_HOST` / `DASHBOARD_HOST` 或 `ASTRBOT_DASHBOARD_PORT` / `DASHBOARD_PORT`，桌面端会优先保留环境变量值。
+
 ## 4. 发布/CI（GitHub Actions）
 
 | 变量 | 用途 | 默认值/行为 |
