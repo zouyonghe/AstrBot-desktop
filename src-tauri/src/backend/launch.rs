@@ -10,6 +10,7 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use serde::Deserialize;
+use serde_json::Value;
 use tauri::AppHandle;
 
 use crate::{
@@ -44,14 +45,7 @@ struct CmdConfigFile {
 #[derive(Debug, Deserialize)]
 struct CmdConfigDashboard {
     host: Option<String>,
-    port: Option<DesktopPortField>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum DesktopPortField {
-    Num(u64),
-    Str(String),
+    port: Option<Value>,
 }
 
 impl CmdDashboardConfig {
@@ -72,9 +66,42 @@ impl CmdDashboardConfig {
             }
         });
 
-        let port = dashboard.port.and_then(|port| match port {
-            DesktopPortField::Num(port) => parse_dashboard_port_number(port, log),
-            DesktopPortField::Str(port) => parse_dashboard_port_string(&port, log),
+        let port = dashboard.port.and_then(|value| match value {
+            Value::Number(port) => match port.as_u64() {
+                Some(port) if (1..=65535).contains(&port) => Some(port.to_string()),
+                Some(port) => {
+                    log(&format!(
+                        "cmd_config: ignoring invalid dashboard.port value: {port}"
+                    ));
+                    None
+                }
+                None => {
+                    log("cmd_config: ignoring non-u64 dashboard.port number");
+                    None
+                }
+            },
+            Value::String(port) => {
+                let trimmed = port.trim();
+                match trimmed.parse::<u64>() {
+                    Ok(port) if (1..=65535).contains(&port) => Some(port.to_string()),
+                    Ok(port) => {
+                        log(&format!(
+                            "cmd_config: ignoring invalid dashboard.port value: {port}"
+                        ));
+                        None
+                    }
+                    Err(_) => {
+                        log(&format!(
+                            "cmd_config: ignoring invalid dashboard.port value: {port:?}"
+                        ));
+                        None
+                    }
+                }
+            }
+            _ => {
+                log("cmd_config: ignoring non-number/string dashboard.port value");
+                None
+            }
         });
 
         Self { host, port }
@@ -141,13 +168,24 @@ fn resolve_dashboard_value(
     config: Option<String>,
     default: &str,
 ) -> (bool, OsString) {
-    if let Some(value) = primary_env.or(legacy_env) {
+    if let Some(value) =
+        non_blank_env_value(primary_env).or_else(|| non_blank_env_value(legacy_env))
+    {
         return (true, value);
     }
     let effective = config
         .map(OsString::from)
         .unwrap_or_else(|| OsString::from(default));
     (false, effective)
+}
+
+fn non_blank_env_value(value: Option<OsString>) -> Option<OsString> {
+    value.filter(|value| {
+        value
+            .to_str()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(true)
+    })
 }
 
 fn read_cmd_dashboard_config(
@@ -185,30 +223,6 @@ fn read_cmd_dashboard_config(
         }
     };
     CmdDashboardConfig::from_file_config(parsed, log)
-}
-
-fn parse_dashboard_port_number(port: u64, log: &mut dyn FnMut(&str)) -> Option<String> {
-    if (1..=65535).contains(&port) {
-        Some(port.to_string())
-    } else {
-        log(&format!(
-            "cmd_config: ignoring invalid dashboard.port value: {port}"
-        ));
-        None
-    }
-}
-
-fn parse_dashboard_port_string(port: &str, log: &mut dyn FnMut(&str)) -> Option<String> {
-    let trimmed = port.trim();
-    match trimmed.parse::<u64>() {
-        Ok(parsed) => parse_dashboard_port_number(parsed, log),
-        Err(_) => {
-            log(&format!(
-                "cmd_config: ignoring invalid dashboard.port value: {port:?}"
-            ));
-            None
-        }
-    }
 }
 
 fn should_skip_default_password_auth(
@@ -626,6 +640,35 @@ mod tests {
 
             assert_eq!(get_command_env_value(&command, DASHBOARD_HOST_ENV), None);
             assert_eq!(get_command_env_value(&command, DASHBOARD_PORT_ENV), None);
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_ignores_blank_dashboard_env() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_cmd_config(
+                root.path(),
+                r#"{"dashboard":{"host":"0.0.0.0","port":"7000"}}"#,
+            );
+            env::set_var(DASHBOARD_HOST_ENV, "  ");
+            env::set_var(DASHBOARD_PORT_ENV, "");
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), &mut |_| {});
+
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some("0.0.0.0".to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_PORT_ENV),
+                Some(Some("7000".to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
+                None
+            );
         });
     }
 
