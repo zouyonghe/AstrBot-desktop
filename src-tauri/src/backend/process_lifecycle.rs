@@ -42,6 +42,33 @@ impl BackendState {
         ))
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn stop_backend_for_system_shutdown(&self, timeout: Duration) -> Result<(), String> {
+        self.stop_backend_log_rotation_worker();
+        let mut guard = self
+            .child
+            .lock()
+            .map_err(|_| "Backend process lock poisoned.".to_string())?;
+
+        let Some(child) = guard.as_mut() else {
+            return Ok(());
+        };
+
+        if process_control::stop_child_process_for_system_shutdown(
+            child,
+            timeout,
+            append_desktop_log,
+        ) {
+            *guard = None;
+            return Ok(());
+        }
+
+        Err(format!(
+            "Backend process did not exit after {}ms Windows shutdown stop timeout.",
+            timeout.as_millis()
+        ))
+    }
+
     pub(crate) fn stop_backend_log_rotation_worker(&self) {
         match self.log_rotator_stop.lock() {
             Ok(mut guard) => {

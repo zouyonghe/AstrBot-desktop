@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "windows", test))]
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -5,6 +7,20 @@ use std::{
     process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::{
+    Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, ERROR_NOT_FOUND,
+        ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE,
+    },
+    System::{
+        Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+        Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE},
+    },
 };
 
 const FORCE_STOP_WAIT_MIN_MS: u64 = 200;
@@ -111,10 +127,173 @@ where
 }
 
 #[cfg(target_os = "windows")]
+fn close_handle(handle: HANDLE) {
+    unsafe {
+        CloseHandle(handle);
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn collect_descendant_processes(root_pid: u32, entries: &[(u32, u32)]) -> Vec<u32> {
+    let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, parent_pid) in entries {
+        children_by_parent
+            .entry(*parent_pid)
+            .or_default()
+            .push(*pid);
+    }
+
+    let mut tree = Vec::new();
+    let mut discovered = HashSet::from([root_pid]);
+    let mut stack = vec![root_pid];
+    while let Some(parent_pid) = stack.pop() {
+        let Some(children) = children_by_parent.get(&parent_pid) else {
+            continue;
+        };
+        for pid in children {
+            if discovered.insert(*pid) {
+                tree.push(*pid);
+                stack.push(*pid);
+            }
+        }
+    }
+    tree.push(root_pid);
+    tree
+}
+
+#[cfg(target_os = "windows")]
+fn snapshot_process_tree(root_pid: u32) -> io::Result<Vec<u32>> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut entries = Vec::new();
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+    let first_ok = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+    if !first_ok {
+        let error = io::Error::last_os_error();
+        close_handle(snapshot);
+        return Err(error);
+    }
+
+    loop {
+        entries.push((entry.th32ProcessID, entry.th32ParentProcessID));
+        let next_ok = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+        if !next_ok {
+            let error = io::Error::last_os_error();
+            if is_process_snapshot_end_error(&error) {
+                break;
+            }
+            close_handle(snapshot);
+            return Err(error);
+        }
+    }
+    close_handle(snapshot);
+
+    Ok(collect_descendant_processes(root_pid, &entries))
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+const ERROR_ACCESS_DENIED: u32 = 5;
+#[cfg(all(test, not(target_os = "windows")))]
+const ERROR_INVALID_PARAMETER: u32 = 87;
+#[cfg(all(test, not(target_os = "windows")))]
+const ERROR_NO_MORE_FILES: u32 = 18;
+#[cfg(all(test, not(target_os = "windows")))]
+const ERROR_NOT_FOUND: u32 = 1168;
+
+#[cfg(any(target_os = "windows", test))]
+fn is_process_snapshot_end_error(error: &io::Error) -> bool {
+    let Some(code) = error.raw_os_error() else {
+        return false;
+    };
+    code as u32 == ERROR_NO_MORE_FILES
+}
+
+#[cfg(target_os = "windows")]
+fn terminate_process_by_pid(pid: u32) -> io::Result<()> {
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if handle.is_null() {
+        let error = io::Error::last_os_error();
+        if is_expected_shutdown_termination_error(&error) {
+            return Ok(());
+        }
+        return Err(error);
+    }
+
+    let result = unsafe { TerminateProcess(handle, 1) };
+    let error = if result == 0 {
+        Some(io::Error::last_os_error())
+    } else {
+        None
+    };
+    close_handle(handle);
+
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn is_expected_shutdown_termination_error(error: &io::Error) -> bool {
+    let Some(code) = error.raw_os_error() else {
+        return false;
+    };
+    matches!(
+        code as u32,
+        ERROR_ACCESS_DENIED | ERROR_INVALID_PARAMETER | ERROR_NOT_FOUND
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn terminate_process_tree_native(root_pid: u32, log: &dyn Fn(&str)) {
+    let process_tree = match snapshot_process_tree(root_pid) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            log(&format!(
+                "native Windows process tree snapshot failed: pid={root_pid}, error={error}"
+            ));
+            vec![root_pid]
+        }
+    };
+
+    for pid in process_tree {
+        if let Err(error) = terminate_process_by_pid(pid) {
+            if !is_expected_shutdown_termination_error(&error) {
+                log(&format!(
+                    "native Windows process termination failed: pid={pid}, error={error}"
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn stop_child_process_for_system_shutdown<F>(
+    child: &mut Child,
+    timeout: Duration,
+    log: F,
+) -> bool
+where
+    F: Fn(&str) + Copy,
+{
+    let pid = child.id();
+    terminate_process_tree_native(pid, &log);
+    wait_for_child_exit(child, timeout)
+}
+
+#[cfg(target_os = "windows")]
 pub fn stop_child_process_gracefully<F>(child: &mut Child, timeout: Duration, log: F) -> bool
 where
     F: Fn(&str) + Copy,
 {
+    // Normal Windows app exits intentionally keep the existing taskkill-based
+    // process-tree cleanup. The system-shutdown path uses native Win32
+    // termination instead so it does not launch taskkill.exe during shutdown.
     let pid = child.id();
     let pid_arg = pid.to_string();
 
@@ -163,6 +342,8 @@ pub fn stop_child_process_gracefully<F>(child: &mut Child, timeout: Duration, lo
 where
     F: Fn(&str) + Copy,
 {
+    // Normal Unix app exits intentionally keep the existing external kill-based
+    // process cleanup.
     let pid = child.id();
     let pid_arg = pid.to_string();
 
@@ -192,6 +373,52 @@ where
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn collect_descendant_processes_deduplicates_with_cycles() {
+        let tree = collect_descendant_processes(
+            10,
+            &[(11, 10), (12, 10), (13, 11), (13, 11), (10, 13), (99, 98)],
+        );
+
+        assert_eq!(tree.len(), 4);
+        assert!(tree.contains(&10));
+        assert!(tree.contains(&11));
+        assert!(tree.contains(&12));
+        assert!(tree.contains(&13));
+        assert!(!tree.contains(&99));
+        assert_eq!(tree.last(), Some(&10));
+    }
+
+    #[test]
+    fn expected_shutdown_termination_errors_match_windows_race_codes() {
+        for code in [
+            ERROR_ACCESS_DENIED,
+            ERROR_INVALID_PARAMETER,
+            ERROR_NOT_FOUND,
+        ] {
+            let error = io::Error::from_raw_os_error(code as i32);
+            assert!(is_expected_shutdown_termination_error(&error));
+        }
+
+        let unexpected = io::Error::from_raw_os_error(123_456);
+        assert!(!is_expected_shutdown_termination_error(&unexpected));
+        assert!(!is_expected_shutdown_termination_error(&io::Error::other(
+            "no os code"
+        )));
+    }
+
+    #[test]
+    fn process_snapshot_end_error_only_matches_no_more_files() {
+        let end = io::Error::from_raw_os_error(ERROR_NO_MORE_FILES as i32);
+        assert!(is_process_snapshot_end_error(&end));
+
+        let unexpected = io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32);
+        assert!(!is_process_snapshot_end_error(&unexpected));
+        assert!(!is_process_snapshot_end_error(&io::Error::other(
+            "no os code"
+        )));
+    }
 
     #[test]
     fn compute_followup_wait_respects_min_and_cap() {

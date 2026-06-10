@@ -120,11 +120,12 @@ mod platform {
 
         append_shutdown_log("Windows shutdown requested, stopping backend quickly");
         let state = app_handle.state::<BackendState>();
-        // Keep this bounded wait inside WM_QUERYENDSESSION so taskkill is issued
-        // before Windows advances to the final session-ending phase.
-        if let Err(error) =
-            state.stop_backend_with_timeout(Duration::from_millis(SYSTEM_SHUTDOWN_STOP_TIMEOUT_MS))
-        {
+        // Avoid launching taskkill.exe during OS shutdown. Late in shutdown,
+        // Windows can fail to initialize new console/system helper processes
+        // with 0xc0000142, which is the issue this hook must prevent.
+        if let Err(error) = state.stop_backend_for_system_shutdown(Duration::from_millis(
+            SYSTEM_SHUTDOWN_STOP_TIMEOUT_MS,
+        )) {
             append_shutdown_log(&format!("backend stop on Windows shutdown failed: {error}"));
         }
     }
