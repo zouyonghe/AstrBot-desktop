@@ -17,6 +17,9 @@ pub struct ShellTexts {
     pub tray_show: &'static str,
     pub tray_reload: &'static str,
     pub tray_restart_backend: &'static str,
+    pub tray_launch_at_login: &'static str,
+    pub tray_silent_launch: &'static str,
+    pub tray_close_to_tray: &'static str,
     pub tray_quit: &'static str,
 }
 
@@ -27,6 +30,9 @@ pub fn shell_texts_for_locale(locale: &str) -> ShellTexts {
             tray_show: "Show AstrBot",
             tray_reload: "Reload UI",
             tray_restart_backend: "Restart Backend",
+            tray_launch_at_login: "Launch at Login",
+            tray_silent_launch: "Silent Launch",
+            tray_close_to_tray: "Close to Tray",
             tray_quit: "Quit",
         };
     }
@@ -36,6 +42,9 @@ pub fn shell_texts_for_locale(locale: &str) -> ShellTexts {
         tray_show: "显示 AstrBot",
         tray_reload: "重载界面",
         tray_restart_backend: "重启后端",
+        tray_launch_at_login: "开机自启",
+        tray_silent_launch: "静默启动",
+        tray_close_to_tray: "关闭到托盘",
         tray_quit: "退出",
     }
 }
@@ -192,6 +201,9 @@ mod tests {
     fn shell_texts_for_locale_returns_english_copy() {
         let texts = shell_texts_for_locale("en-US");
         assert_eq!(texts.tray_hide, "Hide AstrBot");
+        assert_eq!(texts.tray_launch_at_login, "Launch at Login");
+        assert_eq!(texts.tray_silent_launch, "Silent Launch");
+        assert_eq!(texts.tray_close_to_tray, "Close to Tray");
         assert_eq!(texts.tray_quit, "Quit");
     }
 
@@ -199,6 +211,9 @@ mod tests {
     fn shell_texts_for_locale_falls_back_to_zh_cn_copy() {
         let texts = shell_texts_for_locale("zh-CN");
         assert_eq!(texts.tray_hide, "隐藏 AstrBot");
+        assert_eq!(texts.tray_launch_at_login, "开机自启");
+        assert_eq!(texts.tray_silent_launch, "静默启动");
+        assert_eq!(texts.tray_close_to_tray, "关闭到托盘");
         assert_eq!(texts.tray_quit, "退出");
     }
 

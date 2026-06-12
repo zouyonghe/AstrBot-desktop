@@ -1,8 +1,9 @@
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+use tauri_plugin_autostart::ManagerExt;
 
 use crate::{
     append_desktop_log, runtime_paths, shell_locale,
@@ -16,6 +17,11 @@ pub fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
         runtime_paths::default_packaged_root_dir(),
     );
     let shell_texts = shell_locale::shell_texts_for_locale(locale);
+    let desktop_settings = app_handle.state::<crate::DesktopSettingsCache>().get();
+    let launch_at_login_checked = app_handle
+        .autolaunch()
+        .is_enabled()
+        .unwrap_or(desktop_settings.launch_at_login);
     let main_window_visible = app_handle
         .get_webview_window("main")
         .and_then(|window| window.is_visible().ok())
@@ -50,6 +56,33 @@ pub fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
         None::<&str>,
     )
     .map_err(|error| format!("Failed to create tray restart menu item: {error}"))?;
+    let launch_at_login_item = CheckMenuItem::with_id(
+        app_handle,
+        actions::TRAY_MENU_LAUNCH_AT_LOGIN,
+        shell_texts.tray_launch_at_login,
+        true,
+        launch_at_login_checked,
+        None::<&str>,
+    )
+    .map_err(|error| format!("Failed to create tray launch at login menu item: {error}"))?;
+    let silent_launch_item = CheckMenuItem::with_id(
+        app_handle,
+        actions::TRAY_MENU_SILENT_LAUNCH,
+        shell_texts.tray_silent_launch,
+        true,
+        desktop_settings.silent_launch,
+        None::<&str>,
+    )
+    .map_err(|error| format!("Failed to create tray silent launch menu item: {error}"))?;
+    let close_to_tray_item = CheckMenuItem::with_id(
+        app_handle,
+        actions::TRAY_MENU_CLOSE_TO_TRAY,
+        shell_texts.tray_close_to_tray,
+        true,
+        desktop_settings.close_to_tray,
+        None::<&str>,
+    )
+    .map_err(|error| format!("Failed to create tray close to tray menu item: {error}"))?;
     let quit_item = MenuItem::with_id(
         app_handle,
         actions::TRAY_MENU_QUIT,
@@ -60,6 +93,8 @@ pub fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Failed to create tray quit menu item: {error}"))?;
     let separator = PredefinedMenuItem::separator(app_handle)
         .map_err(|error| format!("Failed to create tray separator menu item: {error}"))?;
+    let settings_separator = PredefinedMenuItem::separator(app_handle)
+        .map_err(|error| format!("Failed to create tray settings separator menu item: {error}"))?;
 
     let menu = Menu::with_items(
         app_handle,
@@ -67,6 +102,10 @@ pub fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
             &toggle_item,
             &reload_item,
             &restart_backend_item,
+            &settings_separator,
+            &launch_at_login_item,
+            &silent_launch_item,
+            &close_to_tray_item,
             &separator,
             &quit_item,
         ],
@@ -77,6 +116,9 @@ pub fn setup_tray(app_handle: &AppHandle) -> Result<(), String> {
         toggle_item: toggle_item.clone(),
         reload_item: reload_item.clone(),
         restart_backend_item: restart_backend_item.clone(),
+        launch_at_login_item: launch_at_login_item.clone(),
+        silent_launch_item: silent_launch_item.clone(),
+        close_to_tray_item: close_to_tray_item.clone(),
         quit_item: quit_item.clone(),
     }) {
         append_desktop_log("tray menu state already exists, skipping manage");

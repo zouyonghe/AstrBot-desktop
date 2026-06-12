@@ -4,6 +4,7 @@ use tauri::{webview::PageLoadEvent, RunEvent};
 pub(crate) enum MainWindowAction {
     None,
     PreventCloseAndHide,
+    PreventCloseAndExit,
     HideIfMinimized,
 }
 
@@ -29,6 +30,7 @@ pub(crate) fn main_window_action(
     minimized_on_focus_lost: bool,
     is_close_requested: bool,
     is_focus_lost: bool,
+    close_to_tray: bool,
 ) -> MainWindowAction {
     if window_label != "main" {
         return MainWindowAction::None;
@@ -37,8 +39,10 @@ pub(crate) fn main_window_action(
     if is_close_requested {
         return if is_quitting {
             MainWindowAction::None
-        } else {
+        } else if close_to_tray {
             MainWindowAction::PreventCloseAndHide
+        } else {
+            MainWindowAction::PreventCloseAndExit
         };
     }
 
@@ -101,7 +105,7 @@ mod tests {
     #[test]
     fn main_window_action_ignores_non_main_windows() {
         assert_eq!(
-            main_window_action("settings", false, false, true, false),
+            main_window_action("settings", false, false, true, false, true),
             MainWindowAction::None
         );
     }
@@ -109,15 +113,23 @@ mod tests {
     #[test]
     fn main_window_action_hides_on_close_when_not_quitting() {
         assert_eq!(
-            main_window_action("main", false, false, true, false),
+            main_window_action("main", false, false, true, false, true),
             MainWindowAction::PreventCloseAndHide
+        );
+    }
+
+    #[test]
+    fn main_window_action_allows_close_when_close_to_tray_is_disabled() {
+        assert_eq!(
+            main_window_action("main", false, false, true, false, false),
+            MainWindowAction::PreventCloseAndExit
         );
     }
 
     #[test]
     fn main_window_action_hides_on_minimized_focus_loss() {
         assert_eq!(
-            main_window_action("main", false, true, false, true),
+            main_window_action("main", false, true, false, true, true),
             MainWindowAction::HideIfMinimized
         );
     }

@@ -8,6 +8,7 @@ mod app_types;
 
 mod backend;
 mod bridge;
+mod desktop_settings;
 mod desktop_state;
 
 mod exit_state;
@@ -40,6 +41,7 @@ pub(crate) use app_types::{
     AtomicFlagGuard, BackendBridgeResult, BackendBridgeState, BackendState, LaunchPlan,
     RuntimeManifest, TrayMenuState,
 };
+pub(crate) use desktop_settings::DesktopSettingsCache;
 
 fn main() {
     app_runtime::run();

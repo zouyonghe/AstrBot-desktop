@@ -4,12 +4,17 @@ use tauri::{
 };
 
 use crate::{
-    app_runtime_events, append_desktop_log, append_startup_log, bridge, lifecycle, startup_task,
-    tray, window, BackendState, DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
+    app_runtime_events, append_desktop_log, append_startup_log, bridge, desktop_settings,
+    lifecycle, runtime_paths, startup_task, tray, window, BackendState, DesktopSettingsCache,
+    DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
 };
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     builder
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -21,6 +26,7 @@ fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
 fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     builder.on_window_event(|window, event| {
         let is_quitting = window.app_handle().state::<BackendState>().is_quitting();
+        let desktop_settings = window.app_handle().state::<DesktopSettingsCache>().get();
         let action = match &event {
             WindowEvent::CloseRequested { .. } => app_runtime_events::main_window_action(
                 window.label(),
@@ -28,6 +34,7 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                 false,
                 true,
                 false,
+                desktop_settings.close_to_tray,
             ),
             WindowEvent::Focused(false) => app_runtime_events::main_window_action(
                 window.label(),
@@ -35,6 +42,7 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                 matches!(window.is_minimized(), Ok(true)),
                 false,
                 true,
+                desktop_settings.close_to_tray,
             ),
             _ => app_runtime_events::MainWindowAction::None,
         };
@@ -49,6 +57,12 @@ fn configure_window_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> 
                     DEFAULT_SHELL_LOCALE,
                     append_desktop_log,
                 );
+            }
+            app_runtime_events::MainWindowAction::PreventCloseAndExit => {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+                lifecycle::events::handle_tray_quit(window.app_handle());
             }
             app_runtime_events::MainWindowAction::HideIfMinimized => {
                 window::actions::hide_main_window(
@@ -119,6 +133,16 @@ fn configure_setup(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
         }
         crate::windows_shutdown::install(&app_handle);
 
+        let desktop_settings = app_handle.state::<DesktopSettingsCache>().get();
+        if desktop_settings.silent_launch {
+            append_startup_log("silent launch enabled, hiding main window");
+            window::actions::hide_main_window(
+                &app_handle,
+                DEFAULT_SHELL_LOCALE,
+                append_desktop_log,
+            );
+        }
+
         startup_task::spawn_startup_task(app_handle.clone(), append_startup_log);
         Ok(())
     })
@@ -161,6 +185,11 @@ pub(crate) fn run() {
 
     builder
         .manage(BackendState::default())
+        .manage(DesktopSettingsCache::new(
+            desktop_settings::read_desktop_settings(
+                runtime_paths::default_packaged_root_dir().as_deref(),
+            ),
+        ))
         .invoke_handler(tauri::generate_handler![
             crate::bridge::commands::desktop_bridge_is_desktop_runtime,
             crate::bridge::commands::desktop_bridge_get_backend_state,
