@@ -18,7 +18,7 @@ import { createPrepareResourcesContext } from './prepare-resources/context.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
-const resolveAstrbotVersionForSync = async ({ context }) => {
+const prepareAstrbotVersionSync = async ({ context }) => {
   const {
     mode,
     projectRoot,
@@ -87,7 +87,7 @@ const main = async () => {
     );
   }
 
-  const astrbotVersion = await resolveAstrbotVersionForSync({ context });
+  const astrbotVersion = await prepareAstrbotVersionSync({ context });
 
   await syncDesktopVersionFiles({ projectRoot, version: astrbotVersion });
   if (desktopVersionOverride) {
