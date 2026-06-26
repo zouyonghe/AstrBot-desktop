@@ -18,16 +18,17 @@ import { createPrepareResourcesContext } from './prepare-resources/context.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
-const resolveAstrbotVersionForSync = async ({
-  needsSourceRepo,
-  sourceDir,
-  sourceRepoUrl,
-  sourceRepoRef,
-  isSourceRepoRefCommitSha,
-  sourceDirOverrideInput,
-  desktopVersionInput,
-  desktopVersionOverride,
-}) => {
+const resolveAstrbotVersionForSync = async ({ context, needsSourceRepo }) => {
+  const {
+    sourceDir,
+    sourceRepoUrl,
+    sourceRepoRef,
+    isSourceRepoRefCommitSha,
+    sourceDirOverrideInput,
+    desktopVersionInput,
+    desktopVersionOverride,
+  } = context;
+
   if (!needsSourceRepo) {
     console.log(
       '[prepare-resources] Skip source repo sync in version-only mode because ASTRBOT_DESKTOP_VERSION is set.',
@@ -70,11 +71,6 @@ const main = async () => {
   });
   const {
     mode,
-    sourceDir,
-    sourceRepoUrl,
-    sourceRepoRef,
-    isSourceRepoRefCommitSha,
-    sourceDirOverrideInput,
     desktopVersionInput,
     desktopVersionOverride,
   } = context;
@@ -89,16 +85,7 @@ const main = async () => {
 
   ensureStartupShellAssets(projectRoot);
 
-  const astrbotVersion = await resolveAstrbotVersionForSync({
-    needsSourceRepo,
-    sourceDir,
-    sourceRepoUrl,
-    sourceRepoRef,
-    isSourceRepoRefCommitSha,
-    sourceDirOverrideInput,
-    desktopVersionInput,
-    desktopVersionOverride,
-  });
+  const astrbotVersion = await resolveAstrbotVersionForSync({ context, needsSourceRepo });
 
   await syncDesktopVersionFiles({ projectRoot, version: astrbotVersion });
   if (desktopVersionOverride) {
