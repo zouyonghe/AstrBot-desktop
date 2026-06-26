@@ -18,6 +18,50 @@ import { createPrepareResourcesContext } from './prepare-resources/context.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
+const resolveAstrbotVersionForSync = async ({
+  needsSourceRepo,
+  sourceDir,
+  sourceRepoUrl,
+  sourceRepoRef,
+  isSourceRepoRefCommitSha,
+  sourceDirOverrideInput,
+  desktopVersionInput,
+  desktopVersionOverride,
+}) => {
+  if (!needsSourceRepo) {
+    console.log(
+      '[prepare-resources] Skip source repo sync in version-only mode because ASTRBOT_DESKTOP_VERSION is set.',
+    );
+    return desktopVersionOverride;
+  }
+
+  ensureSourceRepo({
+    sourceDir,
+    sourceRepoUrl,
+    sourceRepoRef,
+    isSourceRepoRefCommitSha,
+    sourceDirOverrideRaw: sourceDirOverrideInput,
+  });
+
+  const astrbotVersion =
+    desktopVersionOverride || (await readAstrbotVersionFromPyproject({ sourceDir }));
+  await validateAstrbotRuntimeVersion({
+    sourceDir,
+    expectedVersion: desktopVersionOverride ? undefined : astrbotVersion,
+  });
+
+  if (desktopVersionOverride) {
+    const sourceVersion = await readAstrbotVersionFromPyproject({ sourceDir });
+    if (sourceVersion !== desktopVersionOverride) {
+      console.warn(
+        `[prepare-resources] Version override drift detected: ASTRBOT_DESKTOP_VERSION=${desktopVersionInput} (normalized=${desktopVersionOverride}), source pyproject version=${sourceVersion} (${sourceDir})`,
+      );
+    }
+  }
+
+  return astrbotVersion;
+};
+
 const main = async () => {
   const context = createPrepareResourcesContext({
     argv: process.argv,
@@ -43,39 +87,18 @@ const main = async () => {
     );
   }
 
-  if (needsSourceRepo) {
-    ensureSourceRepo({
-      sourceDir,
-      sourceRepoUrl,
-      sourceRepoRef,
-      isSourceRepoRefCommitSha,
-      sourceDirOverrideRaw: sourceDirOverrideInput,
-    });
-  } else {
-    console.log(
-      '[prepare-resources] Skip source repo sync in version-only mode because ASTRBOT_DESKTOP_VERSION is set.',
-    );
-  }
-
   ensureStartupShellAssets(projectRoot);
-  const astrbotVersion =
-    desktopVersionOverride || (await readAstrbotVersionFromPyproject({ sourceDir }));
 
-  if (needsSourceRepo) {
-    await validateAstrbotRuntimeVersion({
-      sourceDir,
-      expectedVersion: desktopVersionOverride ? undefined : astrbotVersion,
-    });
-  }
-
-  if (desktopVersionOverride && needsSourceRepo) {
-    const sourceVersion = await readAstrbotVersionFromPyproject({ sourceDir });
-    if (sourceVersion !== desktopVersionOverride) {
-      console.warn(
-        `[prepare-resources] Version override drift detected: ASTRBOT_DESKTOP_VERSION=${desktopVersionInput} (normalized=${desktopVersionOverride}), source pyproject version=${sourceVersion} (${sourceDir})`,
-      );
-    }
-  }
+  const astrbotVersion = await resolveAstrbotVersionForSync({
+    needsSourceRepo,
+    sourceDir,
+    sourceRepoUrl,
+    sourceRepoRef,
+    isSourceRepoRefCommitSha,
+    sourceDirOverrideInput,
+    desktopVersionInput,
+    desktopVersionOverride,
+  });
 
   await syncDesktopVersionFiles({ projectRoot, version: astrbotVersion });
   if (desktopVersionOverride) {
