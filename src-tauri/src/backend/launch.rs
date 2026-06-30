@@ -2,8 +2,11 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs::{self, OpenOptions},
+    io,
     path::Path,
     process::{Command, Stdio},
+    thread,
+    time::Duration,
 };
 
 #[cfg(target_os = "windows")]
@@ -30,6 +33,11 @@ const DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str = "DASHBOARD_SKIP_DEFAULT_P
 const DEFAULT_DASHBOARD_HOST: &str = "127.0.0.1";
 const DEFAULT_DASHBOARD_PORT: &str = "6185";
 const CMD_CONFIG_RELATIVE_PATH: &str = "data/cmd_config.json";
+const CMD_CONFIG_READ_RETRY_ATTEMPTS: usize = 5;
+#[cfg(not(test))]
+const CMD_CONFIG_READ_RETRY_DELAY: Duration = Duration::from_millis(100);
+#[cfg(test)]
+const CMD_CONFIG_READ_RETRY_DELAY: Duration = Duration::from_millis(1);
 
 #[derive(Debug, Default)]
 struct CmdDashboardConfig {
@@ -200,29 +208,122 @@ fn read_cmd_dashboard_config(
         return CmdDashboardConfig::default();
     }
 
-    let raw = match fs::read_to_string(&config_path) {
-        Ok(raw) => raw,
-        Err(error) => {
-            log(&format!(
-                "failed to read cmd_config {}: {}",
-                config_path.display(),
-                error
-            ));
-            return CmdDashboardConfig::default();
-        }
-    };
-    let parsed: CmdConfigFile = match serde_json::from_str(&raw) {
+    let parsed = match read_cmd_config_file_with_retry(&config_path) {
         Ok(parsed) => parsed,
         Err(error) => {
-            log(&format!(
-                "failed to parse cmd_config {}: {}",
-                config_path.display(),
-                error
-            ));
+            match error {
+                CmdConfigError::Read(error) => log(&format!(
+                    "failed to read cmd_config {}: {}",
+                    config_path.display(),
+                    error
+                )),
+                CmdConfigError::Parse { error, .. } => log(&format!(
+                    "failed to parse cmd_config {}: {}",
+                    config_path.display(),
+                    error
+                )),
+            }
             return CmdDashboardConfig::default();
         }
     };
     CmdDashboardConfig::from_file_config(parsed, log)
+}
+
+#[derive(Debug)]
+enum CmdConfigError {
+    Read(io::Error),
+    Parse {
+        error: serde_json::Error,
+        is_empty: bool,
+        is_nonempty_eof: bool,
+    },
+}
+
+fn is_retryable_cmd_config_io_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound
+            | io::ErrorKind::Interrupted
+            | io::ErrorKind::WouldBlock
+            | io::ErrorKind::TimedOut
+    )
+}
+
+fn should_retry_cmd_config_read(error: &CmdConfigError) -> bool {
+    match error {
+        CmdConfigError::Read(error) => is_retryable_cmd_config_io_error(error),
+        CmdConfigError::Parse {
+            is_empty,
+            is_nonempty_eof,
+            ..
+        } => {
+            // Empty files and truncated JSON can occur while cmd_config is being rewritten.
+            // Whitespace-only files are non-empty invalid JSON, so treat them as misconfiguration.
+            *is_empty || *is_nonempty_eof
+        }
+    }
+}
+
+fn describe_cmd_config_error(error: &CmdConfigError) -> String {
+    match error {
+        CmdConfigError::Read(error) => format!("read failed: {error}"),
+        CmdConfigError::Parse { error, .. } => format!("parse failed: {error}"),
+    }
+}
+
+fn read_cmd_config_file_once(config_path: &Path) -> Result<CmdConfigFile, CmdConfigError> {
+    let mut raw = fs::read_to_string(config_path).map_err(CmdConfigError::Read)?;
+    if raw.starts_with('\u{feff}') {
+        raw.remove(0);
+    }
+    match serde_json::from_str(&raw) {
+        Ok(parsed) => Ok(parsed),
+        Err(error) => {
+            let is_empty = raw.is_empty();
+            let is_nonempty_eof = error.is_eof() && !raw.trim().is_empty();
+            Err(CmdConfigError::Parse {
+                error,
+                is_empty,
+                is_nonempty_eof,
+            })
+        }
+    }
+}
+
+fn read_cmd_config_file_with_retry(config_path: &Path) -> Result<CmdConfigFile, CmdConfigError> {
+    read_cmd_config_file_with_retry_and_hook(config_path, |_| {})
+}
+
+fn read_cmd_config_file_with_retry_and_hook<F>(
+    config_path: &Path,
+    mut after_retryable_error: F,
+) -> Result<CmdConfigFile, CmdConfigError>
+where
+    F: FnMut(usize),
+{
+    let mut attempt = 1;
+    loop {
+        match read_cmd_config_file_once(config_path) {
+            Ok(config) => return Ok(config),
+            Err(error) => {
+                if !should_retry_cmd_config_read(&error)
+                    || attempt >= CMD_CONFIG_READ_RETRY_ATTEMPTS
+                {
+                    return Err(error);
+                }
+                append_desktop_log(&format!(
+                    "retrying cmd_config read {}/{} for {}: {}",
+                    attempt,
+                    CMD_CONFIG_READ_RETRY_ATTEMPTS,
+                    config_path.display(),
+                    describe_cmd_config_error(&error)
+                ));
+                after_retryable_error(attempt - 1);
+                thread::sleep(CMD_CONFIG_READ_RETRY_DELAY);
+                attempt += 1;
+            }
+        }
+    }
 }
 
 fn should_skip_default_password_auth(
@@ -430,11 +531,11 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     use super::{
-        configure_desktop_dashboard_environment, sanitize_packaged_python_environment,
-        ASTRBOT_DASHBOARD_HOST_ENV, ASTRBOT_DASHBOARD_PORT_ENV,
-        ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, CMD_CONFIG_RELATIVE_PATH,
-        DASHBOARD_HOST_ENV, DASHBOARD_PORT_ENV, DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV,
-        DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT,
+        configure_desktop_dashboard_environment, read_cmd_config_file_with_retry_and_hook,
+        sanitize_packaged_python_environment, ASTRBOT_DASHBOARD_HOST_ENV,
+        ASTRBOT_DASHBOARD_PORT_ENV, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV,
+        CMD_CONFIG_RELATIVE_PATH, DASHBOARD_HOST_ENV, DASHBOARD_PORT_ENV,
+        DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT,
     };
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -621,6 +722,109 @@ mod tests {
                 get_command_env_value(&command, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV),
                 None
             );
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_accepts_utf8_bom_cmd_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_cmd_config(
+                root.path(),
+                "\u{feff}{\"dashboard\":{\"host\":\"0.0.0.0\",\"port\":6185}}",
+            );
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), &mut |_| {});
+
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some("0.0.0.0".to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_PORT_ENV),
+                Some(Some("6185".to_string()))
+            );
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_retries_transient_empty_cmd_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_cmd_config(root.path(), "");
+            let config_path = root.path().join(CMD_CONFIG_RELATIVE_PATH);
+            let mut retry_count = 0;
+
+            let config = read_cmd_config_file_with_retry_and_hook(&config_path, |attempt| {
+                assert_eq!(attempt, 0);
+                retry_count += 1;
+                fs::write(
+                    &config_path,
+                    r#"{"dashboard":{"host":"0.0.0.0","port":6185}}"#,
+                )
+                .expect("write completed cmd config");
+            })
+            .expect("retry reads completed cmd config");
+            let parsed = super::CmdDashboardConfig::from_file_config(config, &mut |_| {});
+
+            assert_eq!(retry_count, 1);
+            assert_eq!(parsed.host.as_deref(), Some("0.0.0.0"));
+            assert_eq!(parsed.port.as_deref(), Some("6185"));
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_retries_transient_missing_cmd_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_cmd_config(root.path(), r#"{"dashboard":{"host":"127.0.0.1"}}"#);
+            let config_path = root.path().join(CMD_CONFIG_RELATIVE_PATH);
+            fs::remove_file(&config_path).expect("remove cmd config during rewrite");
+            let mut retry_count = 0;
+
+            let config = read_cmd_config_file_with_retry_and_hook(&config_path, |attempt| {
+                assert_eq!(attempt, 0);
+                retry_count += 1;
+                fs::write(
+                    &config_path,
+                    r#"{"dashboard":{"host":"0.0.0.0","port":6185}}"#,
+                )
+                .expect("write completed cmd config");
+            })
+            .expect("retry reads completed cmd config");
+            let parsed = super::CmdDashboardConfig::from_file_config(config, &mut |_| {});
+
+            assert_eq!(retry_count, 1);
+            assert_eq!(parsed.host.as_deref(), Some("0.0.0.0"));
+            assert_eq!(parsed.port.as_deref(), Some("6185"));
+        });
+    }
+
+    #[test]
+    fn configure_desktop_dashboard_environment_does_not_retry_whitespace_only_cmd_config() {
+        with_clean_dashboard_env(|| {
+            let root = tempfile::tempdir().expect("temp root");
+            write_cmd_config(root.path(), "\n\n  ");
+            let config_path = root.path().join(CMD_CONFIG_RELATIVE_PATH);
+            let mut retry_count = 0;
+            let mut command = Command::new("sh");
+
+            configure_desktop_dashboard_environment(&mut command, Some(root.path()), &mut |_| {});
+            let result = read_cmd_config_file_with_retry_and_hook(&config_path, |_| {
+                retry_count += 1;
+            });
+
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_HOST_ENV),
+                Some(Some(DEFAULT_DASHBOARD_HOST.to_string()))
+            );
+            assert_eq!(
+                get_command_env_value(&command, DASHBOARD_PORT_ENV),
+                Some(Some(DEFAULT_DASHBOARD_PORT.to_string()))
+            );
+            assert!(result.is_err());
+            assert_eq!(retry_count, 0);
         });
     }
 

@@ -224,6 +224,28 @@ mod tests {
         root.join("data").join("desktop_state.json")
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn clear(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     fn settings(
         launch_at_login: bool,
         silent_launch: bool,
@@ -244,6 +266,7 @@ mod tests {
 
     #[test]
     fn read_desktop_settings_maps_camel_case_fields() {
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let root = create_temp_case_dir("read");
         let path = state_path(&root);
         fs::create_dir_all(path.parent().expect("state parent")).expect("create state parent");
@@ -261,6 +284,7 @@ mod tests {
 
     #[test]
     fn read_desktop_settings_applies_field_defaults_for_missing_values() {
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let root = create_temp_case_dir("defaults");
         let path = state_path(&root);
         fs::create_dir_all(path.parent().expect("state parent")).expect("create state parent");
@@ -284,6 +308,7 @@ mod tests {
 
     #[test]
     fn write_desktop_setting_preserves_unknown_fields() {
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let root = create_temp_case_dir("preserve");
         let path = state_path(&root);
         fs::create_dir_all(path.parent().expect("state parent")).expect("create state parent");
@@ -315,6 +340,7 @@ mod tests {
 
     #[test]
     fn invalid_state_falls_back_to_defaults_and_write_resets_object() {
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let root = create_temp_case_dir("invalid");
         let path = state_path(&root);
         fs::create_dir_all(path.parent().expect("state parent")).expect("create state parent");
@@ -339,6 +365,7 @@ mod tests {
 
     #[test]
     fn invalid_state_is_rewritten_to_defaults_on_read() {
+        let _root_guard = EnvVarGuard::clear(crate::ASTRBOT_ROOT_ENV);
         let root = create_temp_case_dir("invalid-read-reset");
         let path = state_path(&root);
         fs::create_dir_all(path.parent().expect("state parent")).expect("create state parent");
