@@ -132,6 +132,11 @@ where
     command.env("PYTHONNOUSERSITE", "1");
 }
 
+fn configure_desktop_managed_environment(command: &mut Command) {
+    command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+    command.env("ASTRBOT_DESKTOP_MANAGED", "1");
+}
+
 fn configure_desktop_dashboard_environment(
     command: &mut Command,
     root_dir: Option<&Path>,
@@ -434,7 +439,7 @@ impl BackendState {
 
         if plan.packaged_mode {
             sanitize_packaged_python_environment(&mut command, append_desktop_log);
-            command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+            configure_desktop_managed_environment(&mut command);
         }
 
         if let Some(root_dir) = &plan.root_dir {
@@ -531,8 +536,9 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     use super::{
-        configure_desktop_dashboard_environment, read_cmd_config_file_with_retry_and_hook,
-        sanitize_packaged_python_environment, ASTRBOT_DASHBOARD_HOST_ENV,
+        configure_desktop_dashboard_environment, configure_desktop_managed_environment,
+        read_cmd_config_file_with_retry_and_hook, sanitize_packaged_python_environment,
+        ASTRBOT_DASHBOARD_HOST_ENV,
         ASTRBOT_DASHBOARD_PORT_ENV, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV,
         CMD_CONFIG_RELATIVE_PATH, DASHBOARD_HOST_ENV, DASHBOARD_PORT_ENV,
         DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT,
@@ -618,6 +624,22 @@ mod tests {
 
         assert_eq!(
             get_command_env_value(&command, "PYTHONNOUSERSITE"),
+            Some(Some("1".to_string()))
+        );
+    }
+
+    #[test]
+    fn configure_desktop_managed_environment_marks_backend_as_desktop_managed() {
+        let mut command = Command::new("sh");
+
+        configure_desktop_managed_environment(&mut command);
+
+        assert_eq!(
+            get_command_env_value(&command, "ASTRBOT_DESKTOP_CLIENT"),
+            Some(Some("1".to_string()))
+        );
+        assert_eq!(
+            get_command_env_value(&command, "ASTRBOT_DESKTOP_MANAGED"),
             Some(Some("1".to_string()))
         );
     }
