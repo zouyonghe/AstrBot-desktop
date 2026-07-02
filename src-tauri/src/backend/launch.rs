@@ -30,6 +30,8 @@ const ASTRBOT_DASHBOARD_PORT_ENV: &str = "ASTRBOT_DASHBOARD_PORT";
 const ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str =
     "ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH";
 const DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV: &str = "DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH";
+const ASTRBOT_DESKTOP_CLIENT_ENV: &str = "ASTRBOT_DESKTOP_CLIENT";
+const ASTRBOT_DESKTOP_MANAGED_ENV: &str = "ASTRBOT_DESKTOP_MANAGED";
 const DEFAULT_DASHBOARD_HOST: &str = "127.0.0.1";
 const DEFAULT_DASHBOARD_PORT: &str = "6185";
 const CMD_CONFIG_RELATIVE_PATH: &str = "data/cmd_config.json";
@@ -130,6 +132,11 @@ where
         command.env_remove(key);
     }
     command.env("PYTHONNOUSERSITE", "1");
+}
+
+fn configure_desktop_managed_environment(command: &mut Command) {
+    command.env(ASTRBOT_DESKTOP_CLIENT_ENV, "1");
+    command.env(ASTRBOT_DESKTOP_MANAGED_ENV, "1");
 }
 
 fn configure_desktop_dashboard_environment(
@@ -434,7 +441,7 @@ impl BackendState {
 
         if plan.packaged_mode {
             sanitize_packaged_python_environment(&mut command, append_desktop_log);
-            command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+            configure_desktop_managed_environment(&mut command);
         }
 
         if let Some(root_dir) = &plan.root_dir {
@@ -531,11 +538,13 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     use super::{
-        configure_desktop_dashboard_environment, read_cmd_config_file_with_retry_and_hook,
-        sanitize_packaged_python_environment, ASTRBOT_DASHBOARD_HOST_ENV,
-        ASTRBOT_DASHBOARD_PORT_ENV, ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV,
-        CMD_CONFIG_RELATIVE_PATH, DASHBOARD_HOST_ENV, DASHBOARD_PORT_ENV,
-        DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT,
+        configure_desktop_dashboard_environment, configure_desktop_managed_environment,
+        read_cmd_config_file_with_retry_and_hook, sanitize_packaged_python_environment,
+        ASTRBOT_DASHBOARD_HOST_ENV, ASTRBOT_DASHBOARD_PORT_ENV,
+        ASTRBOT_DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, ASTRBOT_DESKTOP_CLIENT_ENV,
+        ASTRBOT_DESKTOP_MANAGED_ENV, CMD_CONFIG_RELATIVE_PATH, DASHBOARD_HOST_ENV,
+        DASHBOARD_PORT_ENV, DASHBOARD_SKIP_DEFAULT_PASSWORD_AUTH_ENV, DEFAULT_DASHBOARD_HOST,
+        DEFAULT_DASHBOARD_PORT,
     };
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -618,6 +627,22 @@ mod tests {
 
         assert_eq!(
             get_command_env_value(&command, "PYTHONNOUSERSITE"),
+            Some(Some("1".to_string()))
+        );
+    }
+
+    #[test]
+    fn configure_desktop_managed_environment_marks_backend_as_desktop_managed() {
+        let mut command = Command::new("sh");
+
+        configure_desktop_managed_environment(&mut command);
+
+        assert_eq!(
+            get_command_env_value(&command, ASTRBOT_DESKTOP_CLIENT_ENV),
+            Some(Some("1".to_string()))
+        );
+        assert_eq!(
+            get_command_env_value(&command, ASTRBOT_DESKTOP_MANAGED_ENV),
             Some(Some("1".to_string()))
         );
     }
