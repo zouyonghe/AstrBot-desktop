@@ -9,6 +9,21 @@ use crate::{
     DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
 };
 
+const WEBKIT_DISABLE_DMABUF_RENDERER_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+
+fn should_set_webkit_dmabuf_renderer_env(existing_value: Option<&std::ffi::OsStr>) -> bool {
+    existing_value.is_none()
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_workarounds() {
+    if should_set_webkit_dmabuf_renderer_env(
+        std::env::var_os(WEBKIT_DISABLE_DMABUF_RENDERER_ENV).as_deref(),
+    ) {
+        std::env::set_var(WEBKIT_DISABLE_DMABUF_RENDERER_ENV, "1");
+    }
+}
+
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     builder
         .plugin(tauri_plugin_autostart::init(
@@ -168,6 +183,9 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: RunEvent) {
 }
 
 pub(crate) fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_workarounds();
+
     append_startup_log("desktop process starting");
     append_startup_log(&format!(
         "desktop log path: {}",
@@ -206,4 +224,20 @@ pub(crate) fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(handle_run_event);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webkit_dmabuf_workaround_is_set_only_when_unset() {
+        assert!(should_set_webkit_dmabuf_renderer_env(None));
+        assert!(!should_set_webkit_dmabuf_renderer_env(Some(
+            std::ffi::OsStr::new("0")
+        )));
+        assert!(!should_set_webkit_dmabuf_renderer_env(Some(
+            std::ffi::OsStr::new("1")
+        )));
+    }
 }
