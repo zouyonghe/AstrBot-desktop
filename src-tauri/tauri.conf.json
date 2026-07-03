@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AstrBot",
-  "mainBinaryName": "astrbot-desktop",
   "version": "4.26.4",
   "identifier": "com.astrbot.desktop.tauri",
   "build": {
