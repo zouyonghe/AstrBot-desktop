@@ -32,6 +32,11 @@ where
     command.env("PYTHONNOUSERSITE", "1");
 }
 
+fn configure_desktop_managed_environment(command: &mut Command) {
+    command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+    command.env("ASTRBOT_DESKTOP_MANAGED", "1");
+}
+
 impl BackendState {
     pub(crate) fn resolve_launch_plan(&self, app: &AppHandle) -> Result<crate::LaunchPlan, String> {
         if let Some(custom_cmd) = env::var("ASTRBOT_BACKEND_CMD")
@@ -113,7 +118,7 @@ impl BackendState {
 
         if plan.packaged_mode {
             sanitize_packaged_python_environment(&mut command, append_desktop_log);
-            command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+            configure_desktop_managed_environment(&mut command);
             if env::var("DASHBOARD_HOST").is_err() && env::var("ASTRBOT_DASHBOARD_HOST").is_err() {
                 command.env("DASHBOARD_HOST", "127.0.0.1");
             }
@@ -205,7 +210,7 @@ impl BackendState {
 mod tests {
     use std::{ffi::OsStr, process::Command};
 
-    use super::sanitize_packaged_python_environment;
+    use super::{configure_desktop_managed_environment, sanitize_packaged_python_environment};
 
     fn get_command_env_value(command: &Command, key: &str) -> Option<Option<String>> {
         command
@@ -234,6 +239,22 @@ mod tests {
 
         assert_eq!(
             get_command_env_value(&command, "PYTHONNOUSERSITE"),
+            Some(Some("1".to_string()))
+        );
+    }
+
+    #[test]
+    fn configure_desktop_managed_environment_marks_backend_as_desktop_managed() {
+        let mut command = Command::new("sh");
+
+        configure_desktop_managed_environment(&mut command);
+
+        assert_eq!(
+            get_command_env_value(&command, "ASTRBOT_DESKTOP_CLIENT"),
+            Some(Some("1".to_string()))
+        );
+        assert_eq!(
+            get_command_env_value(&command, "ASTRBOT_DESKTOP_MANAGED"),
             Some(Some("1".to_string()))
         );
     }
