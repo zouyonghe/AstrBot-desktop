@@ -16,6 +16,10 @@ use crate::{
 #[cfg(target_os = "windows")]
 use crate::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
+const ASTRBOT_DESKTOP_CLIENT_ENV: &str = "ASTRBOT_DESKTOP_CLIENT";
+const ASTRBOT_DESKTOP_MANAGED_ENV: &str = "ASTRBOT_DESKTOP_MANAGED";
+const ENABLED_ENV_VALUE: &str = "1";
+
 fn sanitize_packaged_python_environment<F>(command: &mut Command, log: F)
 where
     F: Fn(&str),
@@ -30,6 +34,11 @@ where
         command.env_remove(key);
     }
     command.env("PYTHONNOUSERSITE", "1");
+}
+
+fn mark_as_desktop_managed(command: &mut Command) {
+    command.env(ASTRBOT_DESKTOP_CLIENT_ENV, ENABLED_ENV_VALUE);
+    command.env(ASTRBOT_DESKTOP_MANAGED_ENV, ENABLED_ENV_VALUE);
 }
 
 impl BackendState {
@@ -113,7 +122,7 @@ impl BackendState {
 
         if plan.packaged_mode {
             sanitize_packaged_python_environment(&mut command, append_desktop_log);
-            command.env("ASTRBOT_DESKTOP_CLIENT", "1");
+            mark_as_desktop_managed(&mut command);
             if env::var("DASHBOARD_HOST").is_err() && env::var("ASTRBOT_DASHBOARD_HOST").is_err() {
                 command.env("DASHBOARD_HOST", "127.0.0.1");
             }
@@ -205,7 +214,10 @@ impl BackendState {
 mod tests {
     use std::{ffi::OsStr, process::Command};
 
-    use super::sanitize_packaged_python_environment;
+    use super::{
+        mark_as_desktop_managed, sanitize_packaged_python_environment, ASTRBOT_DESKTOP_CLIENT_ENV,
+        ASTRBOT_DESKTOP_MANAGED_ENV, ENABLED_ENV_VALUE,
+    };
 
     fn get_command_env_value(command: &Command, key: &str) -> Option<Option<String>> {
         command
@@ -235,6 +247,22 @@ mod tests {
         assert_eq!(
             get_command_env_value(&command, "PYTHONNOUSERSITE"),
             Some(Some("1".to_string()))
+        );
+    }
+
+    #[test]
+    fn mark_as_desktop_managed_sets_desktop_management_markers() {
+        let mut command = Command::new("sh");
+
+        mark_as_desktop_managed(&mut command);
+
+        assert_eq!(
+            get_command_env_value(&command, ASTRBOT_DESKTOP_CLIENT_ENV),
+            Some(Some(ENABLED_ENV_VALUE.to_string()))
+        );
+        assert_eq!(
+            get_command_env_value(&command, ASTRBOT_DESKTOP_MANAGED_ENV),
+            Some(Some(ENABLED_ENV_VALUE.to_string()))
         );
     }
 }
