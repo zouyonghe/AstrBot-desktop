@@ -3,37 +3,66 @@ use tauri::{
     Builder, Manager, RunEvent, WindowEvent,
 };
 
+#[cfg(target_os = "linux")]
+mod linux_webkit_workaround {
+    const WEBKIT_DISABLE_DMABUF_RENDERER_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    const WAYLAND_DISPLAY_ENV: &str = "WAYLAND_DISPLAY";
+
+    fn should_set_webkit_dmabuf_renderer_env(
+        existing_value: Option<&std::ffi::OsStr>,
+        wayland_display: Option<&std::ffi::OsStr>,
+    ) -> bool {
+        existing_value.is_none() && wayland_display.is_some()
+    }
+
+    pub(super) fn configure(log: impl Fn(&str)) {
+        if should_set_webkit_dmabuf_renderer_env(
+            std::env::var_os(WEBKIT_DISABLE_DMABUF_RENDERER_ENV).as_deref(),
+            std::env::var_os(WAYLAND_DISPLAY_ENV).as_deref(),
+        ) {
+            std::env::set_var(WEBKIT_DISABLE_DMABUF_RENDERER_ENV, "1");
+            log(&format!(
+                "applied Linux WebKit workaround: set {WEBKIT_DISABLE_DMABUF_RENDERER_ENV}=1"
+            ));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::should_set_webkit_dmabuf_renderer_env;
+
+        #[test]
+        fn webkit_dmabuf_workaround_is_set_only_for_wayland_without_override() {
+            assert!(should_set_webkit_dmabuf_renderer_env(
+                None,
+                Some(std::ffi::OsStr::new("wayland-0"))
+            ));
+            assert!(!should_set_webkit_dmabuf_renderer_env(None, None));
+            assert!(!should_set_webkit_dmabuf_renderer_env(
+                Some(std::ffi::OsStr::new("0")),
+                Some(std::ffi::OsStr::new("wayland-0"))
+            ));
+            assert!(!should_set_webkit_dmabuf_renderer_env(
+                Some(std::ffi::OsStr::new("1")),
+                Some(std::ffi::OsStr::new("wayland-0"))
+            ));
+            assert!(!should_set_webkit_dmabuf_renderer_env(
+                Some(std::ffi::OsStr::new("0")),
+                None
+            ));
+            assert!(!should_set_webkit_dmabuf_renderer_env(
+                Some(std::ffi::OsStr::new("1")),
+                None
+            ));
+        }
+    }
+}
+
 use crate::{
     app_runtime_events, append_desktop_log, append_startup_log, bridge, desktop_settings,
     lifecycle, runtime_paths, startup_task, tray, window, BackendState, DesktopSettingsCache,
     DEFAULT_SHELL_LOCALE, DESKTOP_LOG_FILE, STARTUP_MODE_ENV,
 };
-
-#[cfg(target_os = "linux")]
-const WEBKIT_DISABLE_DMABUF_RENDERER_ENV: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-#[cfg(target_os = "linux")]
-const WAYLAND_DISPLAY_ENV: &str = "WAYLAND_DISPLAY";
-
-#[cfg(target_os = "linux")]
-fn should_set_webkit_dmabuf_renderer_env(
-    existing_value: Option<&std::ffi::OsStr>,
-    wayland_display: Option<&std::ffi::OsStr>,
-) -> bool {
-    existing_value.is_none() && wayland_display.is_some()
-}
-
-#[cfg(target_os = "linux")]
-fn configure_linux_webkit_workarounds() {
-    if should_set_webkit_dmabuf_renderer_env(
-        std::env::var_os(WEBKIT_DISABLE_DMABUF_RENDERER_ENV).as_deref(),
-        std::env::var_os(WAYLAND_DISPLAY_ENV).as_deref(),
-    ) {
-        std::env::set_var(WEBKIT_DISABLE_DMABUF_RENDERER_ENV, "1");
-        append_startup_log(&format!(
-            "applied Linux WebKit workaround: set {WEBKIT_DISABLE_DMABUF_RENDERER_ENV}=1"
-        ));
-    }
-}
 
 fn configure_plugins(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     builder
@@ -151,6 +180,15 @@ fn configure_page_load_events(builder: Builder<tauri::Wry>) -> Builder<tauri::Wr
     })
 }
 
+fn apply_startup_window_visibility(app_handle: &tauri::AppHandle, silent_launch: bool) {
+    if silent_launch {
+        append_startup_log("silent launch enabled, keeping main window hidden");
+        window::actions::hide_main_window(app_handle, DEFAULT_SHELL_LOCALE, append_desktop_log);
+    } else {
+        window::actions::show_main_window(app_handle, DEFAULT_SHELL_LOCALE, append_desktop_log);
+    }
+}
+
 fn configure_setup(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
     builder.setup(|app| {
         let app_handle = app.handle().clone();
@@ -160,21 +198,7 @@ fn configure_setup(builder: Builder<tauri::Wry>) -> Builder<tauri::Wry> {
         crate::windows_shutdown::install(&app_handle);
 
         let desktop_settings = app_handle.state::<DesktopSettingsCache>().get();
-        if desktop_settings.silent_launch {
-            append_startup_log("silent launch enabled, keeping main window hidden");
-            tray::labels::update_tray_menu_labels_with_visibility(
-                &app_handle,
-                DEFAULT_SHELL_LOCALE,
-                Some(false),
-                append_desktop_log,
-            );
-        } else {
-            window::actions::show_main_window(
-                &app_handle,
-                DEFAULT_SHELL_LOCALE,
-                append_desktop_log,
-            );
-        }
+        apply_startup_window_visibility(&app_handle, desktop_settings.silent_launch);
 
         startup_task::spawn_startup_task(app_handle.clone(), append_startup_log);
         Ok(())
@@ -202,7 +226,7 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: RunEvent) {
 
 pub(crate) fn run() {
     #[cfg(target_os = "linux")]
-    configure_linux_webkit_workarounds();
+    linux_webkit_workaround::configure(append_startup_log);
 
     append_startup_log("desktop process starting");
     append_startup_log(&format!(
@@ -242,34 +266,4 @@ pub(crate) fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(handle_run_event);
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn webkit_dmabuf_workaround_is_set_only_for_wayland_without_override() {
-        assert!(should_set_webkit_dmabuf_renderer_env(
-            None,
-            Some(std::ffi::OsStr::new("wayland-0"))
-        ));
-        assert!(!should_set_webkit_dmabuf_renderer_env(None, None));
-        assert!(!should_set_webkit_dmabuf_renderer_env(
-            Some(std::ffi::OsStr::new("0")),
-            Some(std::ffi::OsStr::new("wayland-0"))
-        ));
-        assert!(!should_set_webkit_dmabuf_renderer_env(
-            Some(std::ffi::OsStr::new("1")),
-            Some(std::ffi::OsStr::new("wayland-0"))
-        ));
-        assert!(!should_set_webkit_dmabuf_renderer_env(
-            Some(std::ffi::OsStr::new("0")),
-            None
-        ));
-        assert!(!should_set_webkit_dmabuf_renderer_env(
-            Some(std::ffi::OsStr::new("1")),
-            None
-        ));
-    }
 }
